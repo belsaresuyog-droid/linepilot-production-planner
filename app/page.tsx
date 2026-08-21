@@ -128,6 +128,7 @@ export default function Home() {
   const [skillMachineIndex, setSkillMachineIndex] = useState(0);
   const [skillSearch, setSkillSearch] = useState("");
   const [authUser, setAuthUser] = useState<AuthUser | null>(null);
+  const [authChecked, setAuthChecked] = useState(false);
   const [capacityView, setCapacityView] = useState<"overview" | "daily" | "graph">("overview");
   const [scheduleLine, setScheduleLine] = useState<AssemblyLine>("AL1");
   const [scheduleView, setScheduleView] = useState<AssemblyLine | "FEEDER">("AL1");
@@ -202,8 +203,8 @@ export default function Home() {
   const [pendingAssistantAction, setPendingAssistantAction] = useState<AssistantAction | null>(null);
   const [assistantThinking, setAssistantThinking] = useState(false);
 
-  useEffect(() => { fetch("/api/auth/session").then((response) => response.ok ? response.json() : { user: null }).then((payload: { user?: AuthUser | null }) => setAuthUser(payload.user ?? null)).catch(() => setAuthUser(null)); }, []);
-  useEffect(() => { Promise.all([
+  useEffect(() => { fetch("/api/auth/session").then((response) => response.ok ? response.json() : { user: null }).then((payload: { user?: AuthUser | null }) => { setAuthUser(payload.user ?? null); setAuthChecked(true); }).catch(() => { setAuthUser(null); setAuthChecked(true); }); }, []);
+  useEffect(() => { if (!authChecked || !authUser) return; Promise.all([
     fetch("/planner-data.json").then((r) => r.json()) as Promise<PlannerData>,
     fetch("/api/products").then((r) => r.ok ? r.json() : { customProducts: [], deletedProductIds: [] }) as Promise<CatalogPayload>,
     fetch("/skill-matrix.json").then((r) => r.ok ? r.json() : null) as Promise<SkillMatrix | null>,
@@ -216,11 +217,12 @@ export default function Home() {
     setDeletedProductIds(deleted);
     const mergedProducts = [...new Map([...d.products, ...custom].map((product) => [product.id, { ...product, assemblyLine: assemblyLineForProduct(product) }])).values()].filter((product) => !deleted.includes(product.id));
     setData({ ...d, products: mergedProducts, families: [...new Set(mergedProducts.map((product) => product.family))].sort() });
-  }); }, []);
+  }); }, [authChecked, authUser]);
 
   useEffect(() => {
+    if (!authChecked || !authUser) return;
     fetch("/api/plans?list=1").then((response) => response.ok ? response.json() : { ranges: [] }).then((payload: { ranges?: string[] }) => setSavedRanges(Array.isArray(payload.ranges) ? payload.ranges : []));
-  }, []);
+  }, [authChecked, authUser]);
 
   useEffect(() => {
     if (!data) return;
@@ -1411,6 +1413,8 @@ export default function Home() {
   };
   const submitAssistantQuestion = (event: React.FormEvent) => { event.preventDefault(); askPlanningAssistant(assistantQuestion); };
 
+  if (!authChecked) return <main className="loading"><div className="loader"/><p>Checking Google login…</p></main>;
+  if (!authUser) return <main className="auth-gate"><div className="auth-gate-card"><img src="/brand/ideal-logo-1.jpg" alt="Ideal Gas Springs" /><p className="eyebrow">IDEAL LINEPILOT · MES &amp; DIGITAL TWIN</p><h1>Sign in to Production Planner</h1><p>Production plans, actuals, machine owners and digital-twin data are available to authorized users only.</p><a className="auth-button auth-google-button" href="/api/auth/google">Continue with Google</a><small>Use your authorized Google Workspace account.</small></div></main>;
   if (!data) return <main className="loading"><div className="loader"/><p>Preparing production data…</p></main>;
 
   return <main>
