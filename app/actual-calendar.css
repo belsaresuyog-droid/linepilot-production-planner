@@ -1,0 +1,39 @@
+.line-chart-cell.has-actual {
+  min-height: 38px;
+  background: #e8f5ed !important;
+  box-shadow: inset 0 0 0 1px #76b992;
+}
+
+.line-chart-cell.has-actual > i {
+  display: none;
+}
+
+.line-chart-cell.has-actual .actual-cell-value,
+.line-chart-cell.has-actual:not(.active) .actual-cell-value {
+  inset: 5px 3px;
+  height: auto;
+  display: grid;
+  place-content: center;
+  gap: 2px;
+  text-align: center;
+  background: #21885e;
+  color: #fff;
+}
+
+.line-chart-cell.has-actual .actual-cell-value b {
+  font-size: 10px;
+}
+
+.line-chart-cell.has-actual .actual-cell-value small {
+  font-size: 7px;
+  color: #fff;
+}
+
+.actual-plan-graph{margin:18px 0 24px;border:1px solid #d7e3dc;border-radius:13px;background:#fff;overflow:hidden;box-shadow:0 6px 18px rgba(30,67,52,.05)}
+.actual-plan-graph>header{display:flex;align-items:center;justify-content:space-between;gap:18px;padding:17px 20px;border-bottom:1px solid #e2e9e5;background:#f7faf8}.actual-plan-graph>header span{font-size:9px;font-weight:800;letter-spacing:1.4px;color:#286e56}.actual-plan-graph h3{margin:3px 0;font-size:19px;color:#1a2e26}.actual-plan-graph p{margin:0;font-size:11px;color:#67776f}.actual-plan-legend{display:flex;align-items:center;gap:7px;font-size:11px;font-weight:700;color:#53645c}.actual-plan-legend i{width:11px;height:11px;margin-left:8px;border-radius:2px}.actual-plan-legend .planned,.actual-bars i.planned{background:#d99032}.actual-plan-legend .actual,.actual-bars i.actual{background:#237b5b}
+.actual-graph-scroll{overflow-x:auto;padding:20px 18px 8px}.actual-bars{display:grid;grid-template-columns:repeat(var(--actual-days,31),minmax(38px,1fr));grid-auto-flow:column;grid-auto-columns:minmax(38px,1fr);height:270px;border-bottom:1px solid #cbd8d1;background:repeating-linear-gradient(to bottom,#fff 0,#fff 53px,#edf2ef 54px)}.actual-bars article{position:relative;display:grid;grid-template-rows:28px 1fr 35px;min-width:38px;border-right:1px solid #eef2ef}.actual-bars article.off{background:repeating-linear-gradient(135deg,rgba(217,224,220,.35),rgba(217,224,220,.35) 5px,transparent 5px,transparent 10px)}.bar-values{display:flex;justify-content:center;gap:3px;align-items:end}.bar-values span{width:46%;overflow:hidden;text-align:center;font-size:7px;font-weight:700;color:#53645c}.bar-pair{display:flex;justify-content:center;align-items:end;gap:3px;padding:0 4px}.bar-pair i{width:42%;min-height:0;border-radius:3px 3px 0 0;transition:height .2s ease}.actual-bars article footer{display:flex;flex-direction:column;align-items:center;justify-content:center;border-top:1px solid #dde6e1}.actual-bars article footer b{font-size:10px}.actual-bars article footer small{font-size:8px;color:#7b8982}.actual-graph-summary{display:flex;justify-content:flex-end;gap:28px;padding:13px 20px;background:#f7faf8;border-top:1px solid #e1e9e4;font-size:11px;color:#596a62}.actual-graph-summary b{margin-right:4px;font-size:13px;color:#1b3329}.actual-graph-summary .ahead b{color:#237b5b}.actual-graph-summary .behind b{color:#c45c36}
+@media(max-width:760px){.actual-plan-graph>header{align-items:flex-start;flex-direction:column}.actual-graph-summary{justify-content:flex-start;flex-wrap:wrap;gap:12px 22px}}
+.actual-line-chart{display:block;min-width:900px;overflow:visible}.actual-line-chart .weekly-off-band{fill:#eef1ef}.graph-grid-line{stroke:#dfe7e2;stroke-width:1}.graph-y-label{fill:#718078;font-size:8px;text-anchor:end}.planned-line,.actual-line{fill:none;stroke-width:2.5;stroke-linecap:round;stroke-linejoin:round}.planned-line{stroke:#d99032}.actual-line{stroke:#237b5b}.planned-point{fill:#fff;stroke:#d99032;stroke-width:2.5}.actual-point{fill:#fff;stroke:#237b5b;stroke-width:2.5}.graph-x-label,.graph-day-label{fill:#35483f;font-size:9px;font-weight:700;text-anchor:middle}.graph-day-label{fill:#78877f;font-size:8px}.weekly-off-label{fill:#b55f39;font-weight:800}
+.actual-plan-legend .holiday{background:#e8b8b0;border:1px solid #c65f50}.actual-line-chart .added-holiday-band{fill:#fae7e3}.off-band-label{fill:#8d9993;font-size:6px;font-weight:800;letter-spacing:.4px;text-anchor:middle}.off-band-label.holiday{fill:#b94f42}.added-holiday-label{fill:#b94f42;font-weight:800}
+.actual-plan-legend .backlog{background:#7656a6}.backlog-line{fill:none;stroke:#7656a6;stroke-width:2.5;stroke-linecap:round;stroke-linejoin:round}.backlog-point{fill:#fff;stroke:#7656a6;stroke-width:2.5}.graph-hit-point{fill:transparent;stroke:transparent;pointer-events:all;cursor:help}
+.schedule-actual-entry{margin:16px 0 20px;border:1px solid #d7e3dc;border-radius:12px;background:#fff;overflow:hidden}.schedule-actual-entry>header{display:flex;align-items:center;justify-content:space-between;gap:15px;padding:15px 18px;background:#f5f9f6;border-bottom:1px solid #e0e9e4}.schedule-actual-entry>header span{font-size:9px;font-weight:800;letter-spacing:1.3px;color:#287057}.schedule-actual-entry>header h3{margin:3px 0;font-size:17px}.schedule-actual-entry>header p{margin:0;font-size:10px;color:#687970}.schedule-actual-entry>header>strong{padding:7px 10px;border-radius:6px;background:#e2efe8;color:#24664e;font-size:10px}.schedule-actual-entry form{display:grid;grid-template-columns:180px minmax(260px,1fr) 170px 190px;gap:12px;align-items:end;padding:16px 18px}.schedule-actual-entry label{display:grid;gap:6px;font-size:10px;font-weight:700;color:#43564d}.schedule-actual-entry input,.schedule-actual-entry select{width:100%;box-sizing:border-box;height:38px;border:1px solid #cad8d0;border-radius:6px;padding:0 10px;background:#fff;color:#1d3128}.schedule-actual-entry form button{height:38px;border:0;border-radius:6px;background:#247457;color:#fff;font-weight:800;cursor:pointer}.schedule-actual-entry form button:disabled{background:#b8c6bf;cursor:not-allowed}.schedule-actual-entry>footer{display:flex;gap:10px;padding:10px 18px;border-top:1px solid #e5ebe7;font-size:10px}.schedule-actual-entry>footer.available{background:#eef8f2;color:#27684f}.schedule-actual-entry>footer.unavailable{background:#fff5ed;color:#a15c32}.schedule-actual-entry>footer span{color:#62746b}@media(max-width:900px){.schedule-actual-entry form{grid-template-columns:1fr 1fr}.schedule-actual-entry>header{align-items:flex-start;flex-direction:column}}@media(max-width:560px){.schedule-actual-entry form{grid-template-columns:1fr}}

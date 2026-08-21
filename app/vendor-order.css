@@ -1,0 +1,12 @@
+.main-panel.feeder-layout .vendor-dispatch-plan {
+  order: 100;
+  margin-top: 18px;
+}
+
+.main-panel.feeder-layout > .working-hours-toggle {
+  order: 101;
+}
+
+.main-panel.feeder-layout > .working-hours-suggestion {
+  order: 102;
+}

@@ -1,0 +1,28 @@
+/* Readability pass: raise the application's smallest labels by roughly 2–3 px. */
+body{font-size:12px}
+small{font-size:10px!important;line-height:1.4!important}
+button,input,select,textarea{font-size:11px!important}
+.eyebrow,.panel-head span,.planning-note i,.settings label,.holiday-panel span,.holiday-controls label,.holiday-list em,
+.tr.th,.capacity-tabs,.feeder-product-title span,.feeder-product-head,.feeder-line-head,.feeder-daily-head,
+.working-hours-labels,.line-chart-corner,.actual-head,.cat-head,.flow-head,.assistant-confirm>span{font-size:9px!important}
+.tr,.feeder-row,.feeder-line-row,.feeder-product-row,.feeder-daily-row,.working-hours-row,.actual-row,.cat-row{font-size:11px!important}
+.family,.line-badge,.status,.capacity-pass,.capacity-fail{font-size:9px!important}
+.line-chart-day b,.line-chart-product b,.line-chart-cell.active i b,.actual-cell-value b{font-size:11px!important}
+.line-chart-day small,.line-chart-product small,.line-chart-product em,.line-chart-cell.active i small,.actual-cell-value small{font-size:9px!important}
+.production-stage h4{font-size:13px!important}
+.production-stage header small,.production-stage header em,.stage-metrics span,.booth-bank-title span,.booth-process-progress span{font-size:9px!important}
+.stage-sequence span,.stage-metrics b,.booth-bank-title b,.booth-card>b{font-size:11px!important}
+.booth-card>span,.booth-card>small{font-size:8px!important}
+.assistant-panel>header small,.assistant-scope,.assistant-welcome button,.assistant-confirm button{font-size:10px!important}
+.assistant-welcome p,.assistant-messages article p{font-size:12px!important;line-height:1.55!important}
+.assistant-messages article span{font-size:9px!important}
+.tube-product-status-board>header span,.tube-status-values small,.tube-status-values em,.tube-status-grid article>footer span{font-size:9px!important}
+@media(max-width:700px){body{font-size:12px}.tr,.feeder-row,.feeder-line-row,.feeder-product-row,.actual-row{font-size:11px!important}}
+
+.actual-summary.actual-summary-with-oee{grid-template-columns:repeat(4,1fr)}
+.actual-oee-card label{display:flex;align-items:center;gap:7px}
+.actual-oee-card input{width:78px;min-height:38px;padding:6px 9px;border:1px solid #aac2b5;border-radius:5px;background:#fff;color:#1f6545;font-size:20px!important;font-weight:900}
+.actual-oee-card label b{font-size:18px}
+.actual-oee-card small{color:#66786e}
+@media(max-width:850px){.actual-summary.actual-summary-with-oee{grid-template-columns:1fr 1fr}}
+@media(max-width:520px){.actual-summary.actual-summary-with-oee{grid-template-columns:1fr}}

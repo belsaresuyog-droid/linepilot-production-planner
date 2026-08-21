@@ -1,0 +1,33 @@
+{
+  "paragraphs": [
+    "Tube Shop - feeder",
+    "Riveting - Feeder",
+    "Assembly Line 1- Prod line",
+    "Assembly Line 2- Prod line",
+    "615 Product Family on AL 2",
+    "Rest 818 & 1021 on AL 1",
+    "Tube Shop & Riveting Shop to produce monthly quantities & then take for assembly",
+    "Consider Manpower requirement & available stations while planning - as o/p is dependant on that",
+    "Plan: Tube shop readiness- add this but will be highly impacted by all other parts also…",
+    "Same with riveting",
+    "Day wise Assly plan for 2 lines..",
+    "Consider 60% OEE while planning & give it as editable tab to change as balancing & planning both will change…",
+    "Line balancing should be done for day wise planning..",
+    "PM consideration, based upon maintenance OEE should also be altered - AxPxQ",
+    "Reports:",
+    "Calendar - Month view to check upon daily capacity booked",
+    "Daily Manpower available",
+    "Machines running",
+    "While planning entire set of operations for each material code should be considered in single piece flow & considered manpower & machines at bottom for each station  in excel file",
+    "Master Data:",
+    "Create a relationship diagram for sequence of operations/stations which is editable by only admin.. With the number of machines & manpower stations.. It should be easy drag & drop  boxes",
+    "Product family & list of products to be mapped",
+    "With single piece flow the rate at which a ready product is packed to be noted  ",
+    "BOMs per product p product family ",
+    "Actual production should also be mapped & the alterations in the plan should be done immediately with the real time production schedules",
+    "Monthly plan creation  - should depict capacity utilization per line",
+    "Daily Plan creation - should depict capacity utilization per line",
+    "Create digital twin of the factory to depict this production as per plan.. Add a facility to add actual production, manpower, machine availability, OEE & update the plan using the digital twin reference & updates to be done in plan as per actual production status.. It should depict the plan pace of production vs actual & updates to be suggested as per the current status.. We will add actual production & status of manpower, machine availability, & OEE twice in a day at 12.30 pm & 5.30 pm which will alter plans accordingly."
+  ],
+  "tables": []
+}

@@ -1,0 +1,27 @@
+{
+  "source": "03. Skill Matrix Workers.xls · Packing",
+  "scale": "1 Not known · 2 Known process · 3 Under supervision · 4 Independently · 5 Can train others",
+  "machines": ["Printing machine-02", "GS Checking", "Tubing", "Sticker", "Box packing", "Striping machine", "FG Stock knowledge", "Inovice understanding", "Transporter end procedure", "GS Kitting", "Box Kitting", "Daily production GS Rejection Report", "Root card cum. Inspection report", "Daily despt/plan report", "Report writing", "ISO Knowledge", "Understanding of Control Plan", "Job Card knowledge", "Computer literacy", "Analytical skill", "ERP"],
+  "workers": [
+    {"id":1,"name":"Pranjali Shedmake","designation":"Helper","skills":[1,4,4,3,2,2,1,1,null,null,null,2,3,2,null,null,null,null,null,null,null],"percentage":45.5},
+    {"id":2,"name":"Sunita Sirsikar","designation":"Helper","skills":[3,4,4,5,4,3,3,1,null,null,null,5,5,5,null,null,null,null,null,null,null],"percentage":76.4},
+    {"id":3,"name":"Bhagyashree Gaikwad","designation":"Helper","skills":[1,4,4,5,4,3,1,1,null,null,null,3,3,2,null,null,null,null,null,null,null],"percentage":56.4},
+    {"id":4,"name":"Poonam Parte","designation":"Helper","skills":[5,4,4,4,5,5,4,3,null,3,null,5,5,4,null,null,null,null,null,null,null],"percentage":85.0},
+    {"id":5,"name":"Sonali Chavan","designation":"Helper","skills":[4,4,5,3,4,3,3,1,null,null,null,4,4,4,null,null,null,null,null,null,null],"percentage":70.9},
+    {"id":6,"name":"Rumatai Gedam","designation":"Helper","skills":[3,3,5,3,4,3,1,1,null,null,null,3,3,4,null,null,null,null,null,null,null],"percentage":60.0},
+    {"id":7,"name":"Rohit Uttekar","designation":"Helper","skills":[3,4,5,4,4,5,3,1,null,null,null,2,4,4,null,null,null,null,null,null,null],"percentage":70.9},
+    {"id":8,"name":"Kiran Salunkhe","designation":"Helper","skills":[1,2,5,4,4,4,2,1,null,null,null,2,3,3,null,null,null,null,null,null,null],"percentage":56.4},
+    {"id":9,"name":"Rohan Bhandekar","designation":"Helper","skills":[5,5,5,5,5,5,4,2,null,3,null,4,5,4,null,null,null,null,null,null,null],"percentage":86.7},
+    {"id":10,"name":"Kuldip Sawant","designation":"Helper","skills":[5,5,5,5,5,5,5,5,5,4,null,5,5,5,null,null,null,null,null,null,null],"percentage":98.5},
+    {"id":11,"name":"Aryan Jadhav","designation":"Helper","skills":[4,3,5,4,4,4,2,2,null,null,null,2,4,2,null,null,null,null,null,null,null],"percentage":65.5},
+    {"id":12,"name":"Samarth Patil","designation":"Helper","skills":[2,3,5,3,4,4,2,1,null,null,null,2,3,2,null,null,null,null,null,null,null],"percentage":56.4},
+    {"id":13,"name":"Mayur Shelke","designation":"Helper","skills":[1,2,5,3,3,4,2,1,null,null,null,2,3,2,null,null,null,null,null,null,null],"percentage":50.9},
+    {"id":14,"name":"Pratik Dound","designation":"Helper","skills":[5,5,5,5,5,5,5,4,4,4,null,4,4,4,null,null,null,null,null,null,null],"percentage":90.8},
+    {"id":15,"name":"Somnath Gurav","designation":"Helper","skills":[2,1,5,2,3,4,2,1,null,null,null,1,2,2,null,null,null,null,null,null,null],"percentage":45.5},
+    {"id":16,"name":"Aniket Bhandekar","designation":"Helper","skills":[1,1,5,2,3,4,2,1,null,null,null,2,2,2,null,null,null,null,null,null,null],"percentage":45.5},
+    {"id":17,"name":"Shubham Pisal","designation":"Despatch Assistant","skills":[5,5,5,5,5,5,5,5,5,null,null,null,null,null,null,null,null,null,null,null,null],"percentage":100.0},
+    {"id":18,"name":"Yogita Phule","designation":"Helper","skills":[null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null],"percentage":0.0},
+    {"id":19,"name":"Jayashree Jadhav","designation":"Helper","skills":[5,5,5,5,5,5,5,4,null,5,null,5,5,4,null,null,null,null,null,null,null],"percentage":96.7},
+    {"id":20,"name":"Shubhangi Jarag","designation":"Helper","skills":[1,5,5,5,5,3,2,2,null,null,null,1,5,1,null,null,null,null,null,null,null],"percentage":63.6}
+  ]
+}
