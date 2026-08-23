@@ -4,6 +4,7 @@ type RuntimeEnv = {
   GOOGLE_CLIENT_SECRET?: string;
   GOOGLE_CALLBACK_URL?: string;
   AUTH_SECRET?: string;
+  ADMIN_EMAIL?: string;
 };
 
 const SESSION_COOKIE = "linepilot_session";
@@ -80,6 +81,27 @@ export function readCookie(request: Request, name: string) {
 
 export async function ensureAuthSchema(db: D1Database) {
   await db.prepare(`CREATE TABLE IF NOT EXISTS auth_sessions (session_hash TEXT PRIMARY KEY NOT NULL, user_id TEXT NOT NULL, email TEXT NOT NULL, name TEXT NOT NULL, picture TEXT, expires_at INTEGER NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`).run();
+  await db.prepare(`CREATE TABLE IF NOT EXISTS auth_users (email TEXT PRIMARY KEY NOT NULL, name TEXT NOT NULL, role TEXT NOT NULL DEFAULT 'user', active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`).run();
+}
+
+function normalizedEmail(email: string) { return email.trim().toLowerCase(); }
+
+export async function isAdminUser(db: D1Database, email: string, runtime?: RuntimeEnv) {
+  if (runtime?.ADMIN_EMAIL && normalizedEmail(runtime.ADMIN_EMAIL) === normalizedEmail(email)) return true;
+  const row = await db.prepare("SELECT role FROM auth_users WHERE email = ? AND active = 1").bind(normalizedEmail(email)).first<{ role: string }>();
+  return row?.role === "admin";
+}
+
+export async function authorizeGoogleUser(db: D1Database, user: { id: string; email: string; name: string; picture?: string }, runtime?: RuntimeEnv) {
+  const email = normalizedEmail(user.email);
+  const existing = await db.prepare("SELECT email, active FROM auth_users WHERE email = ?").bind(email).first<{ email: string; active: number }>();
+  const count = await db.prepare("SELECT COUNT(*) AS count FROM auth_users").first<{ count: number }>();
+  const bootstrap = Number(count?.count ?? 0) === 0 && (!runtime?.ADMIN_EMAIL || normalizedEmail(runtime.ADMIN_EMAIL) === email);
+  if (!existing && !bootstrap) return false;
+  await db.prepare(`INSERT INTO auth_users (email, name, role, active) VALUES (?, ?, ?, 1)
+    ON CONFLICT(email) DO UPDATE SET name = excluded.name, active = 1, updated_at = CURRENT_TIMESTAMP`)
+    .bind(email, user.name || email, bootstrap ? "admin" : "user").run();
+  return true;
 }
 
 export async function createSession(db: D1Database, user: { id: string; email: string; name: string; picture?: string }) {

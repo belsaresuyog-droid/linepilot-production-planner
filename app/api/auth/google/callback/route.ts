@@ -1,5 +1,5 @@
 import { env } from "cloudflare:workers";
-import { authConfig, callbackUrl, cookie, createSession, ensureAuthSchema, readCookie, safeReturnTo, STATE_COOKIE, verifyState, SESSION_COOKIE } from "../../../../auth-google";
+import { authConfig, authorizeGoogleUser, callbackUrl, cookie, createSession, ensureAuthSchema, readCookie, safeReturnTo, STATE_COOKIE, verifyState, SESSION_COOKIE } from "../../../../auth-google";
 
 export async function GET(request: Request) {
   try {
@@ -20,6 +20,8 @@ export async function GET(request: Request) {
     if (!userResponse.ok || !user.sub || !user.email) return Response.json({ error: "Google did not return a valid user profile." }, { status: 502 });
     if (!env.DB) throw new Error("Production planning database is unavailable.");
     await ensureAuthSchema(env.DB);
+    const authorized = await authorizeGoogleUser(env.DB, { id: user.sub, email: user.email, name: user.name || user.email, picture: user.picture }, runtime);
+    if (!authorized) return Response.json({ error: "Your Google account has not been added by an administrator." }, { status: 403 });
     const session = await createSession(env.DB, { id: user.sub, email: user.email, name: user.name || user.email, picture: user.picture });
     const headers = new Headers({ Location: safeReturnTo(verified.returnTo) });
     headers.append("Set-Cookie", cookie(SESSION_COOKIE, session, 7 * 24 * 60 * 60, url.protocol === "https:"));
