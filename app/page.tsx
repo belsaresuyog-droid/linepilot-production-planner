@@ -8,14 +8,16 @@ type PlannerData = { source: string; machines: Machine[]; families: string[]; pr
 type Planned = Product & { planId: string; planQty: number; dueDate: string; dueDay?: number; priority: "High" | "Normal" };
 type ActualProduction = { id: string; date: string; planId: string; materialCode: string; family: string; assemblyLine: AssemblyLine; quantity: number; beforeLunchQuantity?: number; endOfDayQuantity?: number };
 type FeederShiftCheckpoint = { beforeLunchQuantity?: number; endOfDayQuantity?: number };
-type DailyProductionEdit = { plannedQuantity?: number; actualQuantity?: number; reworkQuantity?: number; rejectionQuantity?: number; manpower?: number; interruption?: "none" | "breakdown" | "power-cut"; downtimeMinutes?: number };
+type DailyProductionEdit = { plannedQuantity?: number; actualQuantity?: number; reworkQuantity?: number; rejectionQuantity?: number; manpower?: number; interruption?: "none" | "breakdown" | "power-cut"; downtimeMinutes?: number; interruptionStart?: string; interruptionEnd?: string; breakdownMachine?: string };
+type InterruptionRecord = { id: string; type: "breakdown" | "power-cut"; start: string; end: string; machine?: string };
+type EmergencyDispatch = { id: string; date: string; planId: string; quantity: number; assemblyLine?: AssemblyLine };
 type PreventiveMaintenanceSlot = { id: string; date: string; assemblyLine: AssemblyLine; machineKey: string; startTime: string; durationMinutes: number };
 type SkillWorker = { id: number; name: string; designation: string; skills: number[]; percentage: number };
 type SkillMatrix = { source: string; scale: string; machines: string[]; workers: SkillWorker[] };
 type MachineOwnerEntry = { plannedOperator?: string; actualOperator?: string };
 type AuthUser = { id: string; email: string; name: string; picture?: string | null };
 type ManagedUser = { email: string; name: string; role: "admin" | "user"; active: number; created_at?: string };
-type SavedPlan = { planned: Planned[]; holidays: string[]; hours: number; efficiency: number; actualOee?: number; dailyShiftHours?: Record<string, number>; dailyAssemblyLines?: Record<string, AssemblyLine>; dailyProductionEdits?: Record<string, DailyProductionEdit>; machineOwners?: Record<string, MachineOwnerEntry>; preventiveMaintenanceSlots?: PreventiveMaintenanceSlot[]; routeOrder?: string[]; stationBooths?: Record<string, number>; feederStaged?: Record<string, number>; feederProductCompleted?: Record<string, number>; feederShiftActual?: Record<string, FeederShiftCheckpoint>; powderCoatingSent?: Record<string, number>; powderCoatingReturned?: Record<string, number>; powderCoatingLeadDays?: number; vendorDispatchCapacity?: number; actualProduction?: ActualProduction[] };
+type SavedPlan = { planned: Planned[]; holidays: string[]; hours: number; efficiency: number; actualOee?: number; dailyShiftHours?: Record<string, number>; dailyAssemblyLines?: Record<string, AssemblyLine>; dailyProductionEdits?: Record<string, DailyProductionEdit>; dailyInterruptions?: Record<string, InterruptionRecord[]>; emergencyDispatches?: EmergencyDispatch[]; machineOwners?: Record<string, MachineOwnerEntry>; preventiveMaintenanceSlots?: PreventiveMaintenanceSlot[]; routeOrder?: string[]; stationBooths?: Record<string, number>; feederStaged?: Record<string, number>; feederProductCompleted?: Record<string, number>; feederShiftActual?: Record<string, FeederShiftCheckpoint>; powderCoatingSent?: Record<string, number>; powderCoatingReturned?: Record<string, number>; powderCoatingLeadDays?: number; vendorDispatchCapacity?: number; actualProduction?: ActualProduction[] };
 type CatalogPayload = { customProducts: Product[]; deletedProductIds: number[] };
 type ProductDraft = { materialCode: string; family: string; assemblyLine: AssemblyLine; segment: string; bomAvailable: boolean; orderQty: number; cycleTimes: number[] };
 type AssemblyLine = "AL1" | "AL2";
@@ -109,7 +111,13 @@ function clockMinuteLabel(clockMinute: number) {
   const clock = Math.max(0, Math.round(clockMinute));
   const hour = Math.floor(clock / 60);
   const minute = clock % 60;
-  return `${hour % 12 || 12}:${String(minute).padStart(2, "0")} ${hour % 24 >= 12 ? "PM" : "AM"}${clock > 17 * 60 ? " · overtime" : ""}`;
+  return `${hour % 12 || 12}:${String(minute).padStart(2, "0")} ${hour % 24 >= 12 ? "PM" : "AM"}`;
+}
+function timeInputToMinute(value?: string) {
+  if (!value) return undefined;
+  const [hour, minute] = value.split(":").map(Number);
+  if (!Number.isFinite(hour) || !Number.isFinite(minute)) return undefined;
+  return hour * 60 + minute;
 }
 function productiveMinuteLabel(productiveMinutes: number) {
   return clockMinuteLabel(productiveMinuteToClockMinute(productiveMinutes));
@@ -137,8 +145,13 @@ export default function Home() {
   const [capacityView, setCapacityView] = useState<"overview" | "daily" | "graph">("overview");
   const [scheduleLine, setScheduleLine] = useState<AssemblyLine>("AL1");
   const [scheduleView, setScheduleView] = useState<AssemblyLine | "FEEDER">("AL1");
-  const [scheduleDayView, setScheduleDayView] = useState<"plan" | "breakdown">("plan");
+  const [scheduleDayView, setScheduleDayView] = useState<"plan" | "actual" | "breakdown">("plan");
+  const [actualPanelOpen, setActualPanelOpen] = useState(false);
   const [actualLine, setActualLine] = useState<AssemblyLine>("AL1");
+  const [actualChartProduct, setActualChartProduct] = useState("ALL");
+  const [actualChartGranularity, setActualChartGranularity] = useState<"date" | "week" | "month">("date");
+  const [actualSelectedWeek, setActualSelectedWeek] = useState("ALL");
+  const [actualSelectedDate, setActualSelectedDate] = useState("");
   const [feederWorkingHoursOpen, setFeederWorkingHoursOpen] = useState(true);
   const [graphProcessIndex, setGraphProcessIndex] = useState(0);
   const [startDate, setStartDate] = useState("2026-08-01");
@@ -157,6 +170,10 @@ export default function Home() {
   const [dailyShiftHours, setDailyShiftHours] = useState<Record<string, number>>({});
   const [dailyAssemblyLines, setDailyAssemblyLines] = useState<Record<string, AssemblyLine>>({});
   const [dailyProductionEdits, setDailyProductionEdits] = useState<Record<string, DailyProductionEdit>>({});
+  const [dailyInterruptions, setDailyInterruptions] = useState<Record<string, InterruptionRecord[]>>({});
+  const [emergencyDispatches, setEmergencyDispatches] = useState<EmergencyDispatch[]>([]);
+  const [emergencySearch, setEmergencySearch] = useState("");
+  const [emergencyLine, setEmergencyLine] = useState<AssemblyLine>("AL1");
   const [machineOwners, setMachineOwners] = useState<Record<string, MachineOwnerEntry>>({});
   const [preventiveMaintenanceSlots, setPreventiveMaintenanceSlots] = useState<PreventiveMaintenanceSlot[]>([]);
   const [pmDraft, setPmDraft] = useState({ date: "", assemblyLine: "AL1" as AssemblyLine, machineKey: "", startTime: "10:00", durationMinutes: 15 });
@@ -250,6 +267,8 @@ export default function Home() {
         setDailyShiftHours(plan.dailyShiftHours && typeof plan.dailyShiftHours === "object" ? plan.dailyShiftHours : {});
         setDailyAssemblyLines(plan.dailyAssemblyLines && typeof plan.dailyAssemblyLines === "object" ? plan.dailyAssemblyLines : {});
         setDailyProductionEdits(plan.dailyProductionEdits && typeof plan.dailyProductionEdits === "object" ? plan.dailyProductionEdits : {});
+        setDailyInterruptions(plan.dailyInterruptions && typeof plan.dailyInterruptions === "object" ? plan.dailyInterruptions : {});
+        setEmergencyDispatches(Array.isArray(plan.emergencyDispatches) ? plan.emergencyDispatches : []);
         setMachineOwners(plan.machineOwners && typeof plan.machineOwners === "object" ? plan.machineOwners : {});
         setPreventiveMaintenanceSlots(Array.isArray(plan.preventiveMaintenanceSlots) ? plan.preventiveMaintenanceSlots : []);
         setRouteOrder(Array.isArray(plan.routeOrder) ? plan.routeOrder : []);
@@ -300,12 +319,12 @@ export default function Home() {
       if (deletedPeriodsRef.current.has(month)) return;
       const controller = new AbortController();
       planSaveAbortRef.current = controller;
-      fetch("/api/plans", { method: "PUT", signal: controller.signal, headers: { "content-type": "application/json" }, body: JSON.stringify({ month, plan: { planned, holidays, hours, efficiency, actualOee, dailyShiftHours, dailyAssemblyLines, dailyProductionEdits, machineOwners, preventiveMaintenanceSlots, routeOrder, stationBooths, feederStaged, feederProductCompleted, feederShiftActual, powderCoatingSent, powderCoatingReturned, powderCoatingLeadDays, vendorDispatchCapacity, actualProduction } }) })
+      fetch("/api/plans", { method: "PUT", signal: controller.signal, headers: { "content-type": "application/json" }, body: JSON.stringify({ month, plan: { planned, holidays, hours, efficiency, actualOee, dailyShiftHours, dailyAssemblyLines, dailyProductionEdits, dailyInterruptions, emergencyDispatches, machineOwners, preventiveMaintenanceSlots, routeOrder, stationBooths, feederStaged, feederProductCompleted, feederShiftActual, powderCoatingSent, powderCoatingReturned, powderCoatingLeadDays, vendorDispatchCapacity, actualProduction } }) })
         .then((response) => { if (!response.ok) throw new Error("Save failed"); if (deletedPeriodsRef.current.has(month)) return; setSaveState("saved"); setSavedRanges((old) => old.includes(month) ? old : [...old, month].sort()); })
         .catch((error) => { if (error instanceof DOMException && error.name === "AbortError") return; setSaveState("error"); });
     }, 500);
     return () => { window.clearTimeout(timer); planSaveAbortRef.current?.abort(); };
-  }, [planned, holidays, hours, efficiency, actualOee, dailyShiftHours, dailyAssemblyLines, dailyProductionEdits, machineOwners, preventiveMaintenanceSlots, routeOrder, stationBooths, feederStaged, feederProductCompleted, feederShiftActual, powderCoatingSent, powderCoatingReturned, powderCoatingLeadDays, vendorDispatchCapacity, actualProduction, month, hydratedMonth, savedRanges]);
+  }, [planned, holidays, hours, efficiency, actualOee, dailyShiftHours, dailyAssemblyLines, dailyProductionEdits, dailyInterruptions, emergencyDispatches, machineOwners, preventiveMaintenanceSlots, routeOrder, stationBooths, feederStaged, feederProductCompleted, feederShiftActual, powderCoatingSent, powderCoatingReturned, powderCoatingLeadDays, vendorDispatchCapacity, actualProduction, month, hydratedMonth, savedRanges]);
 
   useEffect(() => {
     if (!twinRunning) return;
@@ -336,7 +355,11 @@ export default function Home() {
   const totalUnits = planned.reduce((s, p) => s + p.planQty, 0);
   const actualAllocationByPlan = useMemo(() => {
     const remainingActual = new Map<string, number>();
-    actualProduction.forEach((record) => remainingActual.set(record.materialCode, (remainingActual.get(record.materialCode) ?? 0) + record.quantity));
+    actualProduction.forEach((record) => {
+      const plannedBaseline = dailyProductionEdits[`${record.date}:${record.planId}`]?.plannedQuantity;
+      const scheduleImpact = plannedBaseline === undefined ? record.quantity : record.quantity - plannedBaseline;
+      remainingActual.set(record.materialCode, (remainingActual.get(record.materialCode) ?? 0) + scheduleImpact);
+    });
     const allocation = new Map<string, number>();
     [...planned].sort((a, b) => (a.priority === b.priority ? a.dueDate.localeCompare(b.dueDate) : a.priority === "High" ? -1 : 1)).forEach((product) => {
       const allocated = Math.min(product.planQty, remainingActual.get(product.materialCode) ?? 0);
@@ -344,7 +367,7 @@ export default function Home() {
       remainingActual.set(product.materialCode, Math.max(0, (remainingActual.get(product.materialCode) ?? 0) - allocated));
     });
     return allocation;
-  }, [planned, actualProduction]);
+  }, [planned, actualProduction, dailyProductionEdits]);
   const assemblyRequiredByPlan = useMemo(() => new Map(planned.map((product) => [product.planId, Math.max(0, product.planQty - (actualAllocationByPlan.get(product.planId) ?? 0))])), [planned, actualAllocationByPlan]);
   const totalAssemblyRequirement = [...assemblyRequiredByPlan.values()].reduce((sum, quantity) => sum + quantity, 0);
   const averageShiftHours = useMemo(() => {
@@ -590,7 +613,8 @@ export default function Home() {
     if (isNonWorkingDay(value, holidaySet)) return 0;
     const dateKey = localDateKey(value);
     const maintenanceMinutes = preventiveMaintenanceSlots.filter((slot) => slot.date === dateKey && (!assemblyLine || slot.assemblyLine === assemblyLine)).reduce((sum, slot) => sum + slot.durationMinutes, 0);
-    return Math.max(0, (dailyShiftHours[dateKey] ?? hours) * 3600 - maintenanceMinutes * 60) * (efficiency / 100);
+    const interruptionMinutes = (dailyInterruptions[dateKey] ?? []).reduce((sum, record) => { const start = timeInputToMinute(record.start); const end = timeInputToMinute(record.end); return start !== undefined && end !== undefined && end > start ? sum + end - start : sum; }, 0);
+    return Math.max(0, (dailyShiftHours[dateKey] ?? hours) * 3600 - (maintenanceMinutes + interruptionMinutes) * 60) * (efficiency / 100);
   };
   const elapsedCapacityBeforeDate = (target: Date, assemblyLine?: AssemblyLine) => {
     let total = 0;
@@ -639,7 +663,7 @@ export default function Home() {
   const saveFeederPlan = async () => {
     setFeederSaveState("saving");
     try {
-      const response = await fetch("/api/plans", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ month, plan: { planned, holidays, hours, efficiency, actualOee, dailyShiftHours, dailyAssemblyLines, dailyProductionEdits, machineOwners, preventiveMaintenanceSlots, routeOrder, stationBooths, feederStaged, feederProductCompleted, feederShiftActual, powderCoatingSent, powderCoatingReturned, powderCoatingLeadDays, vendorDispatchCapacity, actualProduction } }) });
+      const response = await fetch("/api/plans", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ month, plan: { planned, holidays, hours, efficiency, actualOee, dailyShiftHours, dailyAssemblyLines, dailyProductionEdits, dailyInterruptions, emergencyDispatches, machineOwners, preventiveMaintenanceSlots, routeOrder, stationBooths, feederStaged, feederProductCompleted, feederShiftActual, powderCoatingSent, powderCoatingReturned, powderCoatingLeadDays, vendorDispatchCapacity, actualProduction } }) });
       if (!response.ok) throw new Error("Unable to save feeder plan");
       setFeederSaveState("saved");
       setSaveState("saved");
@@ -683,7 +707,7 @@ export default function Home() {
       if (duration > 0) lineElapsedSeconds.set(assemblyLine, finishOffsetSeconds);
       return { ...product, requestedPlanQty: product.planQty, actualCompletedQty, remainingQty, predictionQty, planQty: feederSupportedQty, feederSupportedQty, feederPendingQty: Math.max(0, product.planQty - feederSupportedQty), assemblyLine, effectiveBottleneckSeconds, effectiveBottleneckMachine: effectiveBottleneck?.machine?.name ?? "—", effectiveBottleneckBooths: effectiveBottleneck?.booths ?? 1, dailyCapacity, exactDurationDays, workloadSeconds, startOffsetSeconds, finishOffsetSeconds, startWithinShiftSeconds, finishWithinShiftSeconds, duration, start, finish, due, lateDays, onTime: remainingQty === 0 || finish <= due };
     });
-  }, [planned, availableSeconds, holidaySet, stationBooths, data, assemblyReleaseDate, feederSupportedByPlan, actualAllocationByPlan, dailyShiftHours, hours, efficiency, preventiveMaintenanceSlots]);
+  }, [planned, availableSeconds, holidaySet, stationBooths, data, assemblyReleaseDate, feederSupportedByPlan, actualAllocationByPlan, dailyShiftHours, hours, efficiency, preventiveMaintenanceSlots, dailyInterruptions]);
   const selectedLineSchedule = useMemo(() => schedule.filter((item) => item.assemblyLine === scheduleLine), [schedule, scheduleLine]);
   useEffect(() => {
     if (!schedule.length || !Object.keys(dailyAssemblyLines).length) return;
@@ -724,6 +748,8 @@ export default function Home() {
     const value = new Date(date.getFullYear(), date.getMonth(), date.getDate() + index);
     return { value, key: localDateKey(value), day: value.getDate(), weekday: value.toLocaleDateString("en-IN", { weekday: "narrow" }), off: isNonWorkingDay(value, holidaySet) };
   }), [date, daysInMonth, holidaySet]);
+  const actualChartDateOptions = useMemo(() => calendarDays.filter((day) => !day.off && (actualLineSchedule.some((item) => (actualChartProduct === "ALL" || item.materialCode === actualChartProduct) && day.value >= item.start && day.value <= item.finish) || actualLineProduction.some((record) => (actualChartProduct === "ALL" || record.materialCode === actualChartProduct) && record.date === day.key))).map((day) => day.key), [calendarDays, actualLineSchedule, actualLineProduction, actualChartProduct]);
+  const activeActualChartDate = actualSelectedDate && actualChartDateOptions.includes(actualSelectedDate) ? actualSelectedDate : (actualChartDateOptions[0] ?? "");
   const actualVsPlannedByDay = useMemo(() => {
     let cumulativePlanned = 0;
     let cumulativeActual = 0;
@@ -758,18 +784,25 @@ export default function Home() {
       ...slot,
       machineName: data?.machines.find((machine) => machine.key === slot.machineKey)?.name ?? slot.machineKey,
       startMinute: (() => { const [hour, minute] = slot.startTime.split(":").map(Number); return (hour || 0) * 60 + (minute || 0); })(),
-    })), [preventiveMaintenanceSlots, activeDayPlanKey, scheduleLine, data]);
+    }))
+    .concat(schedule.filter((item) => { const assignedLine = dailyAssemblyLines[`${activeDayPlanKey}:${item.planId}`] ?? item.assemblyLine; const edit = dailyProductionEdits[`${activeDayPlanKey}:${item.planId}`]; return assignedLine === scheduleLine && !!edit && edit.interruption !== "none"; }).flatMap((item) => { const edit = dailyProductionEdits[`${activeDayPlanKey}:${item.planId}`]; const startMinute = timeInputToMinute(edit?.interruptionStart); const endMinute = timeInputToMinute(edit?.interruptionEnd); if (!edit || startMinute === undefined || endMinute === undefined || endMinute <= startMinute) return []; return [{ id: `interrupt-${item.planId}`, machineName: edit.interruption === "power-cut" ? "Power cut" : `Breakdown · ${edit.breakdownMachine || "Machine"}`, startMinute, durationMinutes: endMinute - startMinute }]; }))
+    .concat((dailyInterruptions[activeDayPlanKey] ?? []).flatMap((record) => { const startMinute = timeInputToMinute(record.start); const endMinute = timeInputToMinute(record.end); if (startMinute === undefined || endMinute === undefined || endMinute <= startMinute) return []; return [{ id: record.id, machineName: record.type === "power-cut" ? "Power cut" : `Breakdown · ${record.machine || "Machine"}`, startMinute, durationMinutes: endMinute - startMinute }]; })) as typeof activeDayMaintenanceSlots, [preventiveMaintenanceSlots, activeDayPlanKey, activeDayPlanDate, scheduleLine, data, schedule, dailyAssemblyLines, dailyProductionEdits, dailyInterruptions]);
   const timeWiseDayPlan = useMemo(() => {
     const dayStartSeconds = elapsedCapacityBeforeDate(activeDayPlanDate, scheduleLine);
-    const dayCapacitySeconds = productiveSecondsForDate(activeDayPlanDate, scheduleLine);
+    const interruptionMinutes = schedule.filter((item) => { const assignedLine = dailyAssemblyLines[`${activeDayPlanKey}:${item.planId}`] ?? item.assemblyLine; return assignedLine === scheduleLine; }).reduce((sum, item) => { const edit = dailyProductionEdits[`${activeDayPlanKey}:${item.planId}`]; const start = timeInputToMinute(edit?.interruptionStart); const end = timeInputToMinute(edit?.interruptionEnd); return edit && edit.interruption !== "none" && start !== undefined && end !== undefined && end > start ? sum + end - start : sum; }, 0);
+    const dayCapacitySeconds = Math.max(0, productiveSecondsForDate(activeDayPlanDate, scheduleLine) - interruptionMinutes * 60 * (efficiency / 100));
     const assignedItems = schedule.flatMap((item) => {
-      if (item.remainingQty <= 0 || activeDayPlanDate < item.start || activeDayPlanDate > item.finish) return [];
+      // Keep completed products visible in the daily production entry so their
+      // planned/actual/rework/rejection values remain editable and auditable.
+      const hasDailyEdit = !!dailyProductionEdits[`${activeDayPlanKey}:${item.planId}`];
+      if (item.remainingQty <= 0 && !hasDailyEdit) return [];
+      if (!hasDailyEdit && (activeDayPlanDate < item.start || activeDayPlanDate > item.finish)) return [];
       const assignedLine = dailyAssemblyLines[`${activeDayPlanKey}:${item.planId}`] ?? item.assemblyLine;
       if (assignedLine !== scheduleLine) return [];
       const startSeconds = Math.max(item.startOffsetSeconds, dayStartSeconds);
       const endSeconds = Math.min(item.finishOffsetSeconds, dayStartSeconds + dayCapacitySeconds);
       const effectiveSeconds = Math.max(0, endSeconds - startSeconds);
-      if (!effectiveSeconds) return [];
+      if (!effectiveSeconds && !hasDailyEdit) return [];
       const startWorkMinutes = (startSeconds - dayStartSeconds) / Math.max(.01, efficiency / 100) / 60;
       const durationMinutes = effectiveSeconds / Math.max(.01, efficiency / 100) / 60;
       const clockStartMinute = productiveMinuteToClockMinute(startWorkMinutes);
@@ -777,7 +810,7 @@ export default function Home() {
       return [{ ...item, allocatedCycleSeconds: effectiveSeconds, pieces: Math.max(1, Math.round(effectiveSeconds / item.effectiveBottleneckSeconds)), clockStart: productiveMinuteLabel(startWorkMinutes), clockEnd: productiveMinuteLabel(startWorkMinutes + durationMinutes), clockStartMinute, clockEndMinute, durationMinutes }];
     }).sort((a, b) => a.startOffsetSeconds - b.startOffsetSeconds || a.materialCode.localeCompare(b.materialCode));
     let lineCursorMinutes = 0;
-    return assignedItems.map((item) => {
+    const plannedDayItems = assignedItems.map((item) => {
       const destinationBottleneckSeconds = Math.max(1, ...item.cycleTimes.map((seconds, index) => index >= ASSEMBLY_START_INDEX && seconds > 0 ? seconds / planningBooths(stationBooths, data?.machines[index]?.key ?? "", index) : 0));
       const calculatedPieces = Math.max(1, Math.floor(item.allocatedCycleSeconds / destinationBottleneckSeconds));
       const pieces = Math.max(0, dailyProductionEdits[`${activeDayPlanKey}:${item.planId}`]?.plannedQuantity ?? calculatedPieces);
@@ -788,7 +821,19 @@ export default function Home() {
       lineCursorMinutes += durationMinutes;
       return { ...item, pieces, effectiveBottleneckSeconds: destinationBottleneckSeconds, durationMinutes, clockStart: productiveMinuteLabel(startWorkMinutes), clockEnd: productiveMinuteLabel(startWorkMinutes + durationMinutes), clockStartMinute, clockEndMinute };
     });
-  }, [schedule, scheduleLine, dailyAssemblyLines, dailyProductionEdits, activeDayPlanKey, activeDayPlanDate, assemblyReleaseDate, holidaySet, availableSeconds, efficiency, dailyShiftHours, hours, stationBooths, data]);
+    const emergencyDayItems = emergencyDispatches.filter((record) => record.date === activeDayPlanKey && !planned.some((item) => item.planId === record.planId)).flatMap((record) => {
+      const source = planned.find((item) => item.planId === record.planId) ?? data?.products.find((item) => `catalog-${item.id}` === record.planId);
+      if (!source || (record.assemblyLine ?? assemblyLineForProduct(source)) !== scheduleLine || record.quantity <= 0) return [];
+      const destinationBottleneckSeconds = Math.max(1, ...source.cycleTimes.map((seconds, index) => index >= ASSEMBLY_START_INDEX && seconds > 0 ? seconds / planningBooths(stationBooths, data?.machines[index]?.key ?? "", index) : 0));
+      const durationMinutes = record.quantity * destinationBottleneckSeconds / Math.max(.01, efficiency / 100) / 60;
+      const startWorkMinutes = lineCursorMinutes;
+      const clockStartMinute = productiveMinuteToClockMinute(startWorkMinutes);
+      const clockEndMinute = productiveMinuteToClockMinute(startWorkMinutes + durationMinutes);
+      lineCursorMinutes += durationMinutes;
+      return [{ ...source, planId: `emergency-${record.id}`, remainingQty: record.quantity, pieces: record.quantity, allocatedCycleSeconds: record.quantity * destinationBottleneckSeconds, effectiveBottleneckSeconds: destinationBottleneckSeconds, durationMinutes, clockStart: productiveMinuteLabel(startWorkMinutes), clockEnd: productiveMinuteLabel(startWorkMinutes + durationMinutes), clockStartMinute, clockEndMinute }];
+    });
+    return [...plannedDayItems, ...emergencyDayItems];
+  }, [schedule, planned, data, emergencyDispatches, scheduleLine, dailyAssemblyLines, dailyProductionEdits, dailyInterruptions, activeDayPlanKey, activeDayPlanDate, assemblyReleaseDate, holidaySet, availableSeconds, efficiency, dailyShiftHours, hours, stationBooths]);
   const timeWiseAgendaBlocks = useMemo(() => timeWiseDayPlan.flatMap((item) => {
     const workWindows = [[8 * 60, 12 * 60 + 30], [13 * 60, 16 * 60], [16 * 60 + 10, Number.POSITIVE_INFINITY]];
     const totalVisibleMinutes = Math.max(1, item.durationMinutes);
@@ -800,6 +845,15 @@ export default function Home() {
       return [{ ...item, startMinute, endMinute, segmentPieces: Math.max(1, Math.round(item.pieces * segmentMinutes / totalVisibleMinutes)), windowIndex }];
     });
   }), [timeWiseDayPlan]);
+  const interruptionAgendaBlocks = useMemo(() => timeWiseDayPlan.flatMap((item) => {
+    const edit = dailyProductionEdits[`${activeDayPlanKey}:${item.planId}`];
+    if (!edit || edit.interruption === "none" || !edit.interruptionStart || !edit.interruptionEnd) return [];
+    const startMinute = timeInputToMinute(edit.interruptionStart);
+    const endMinute = timeInputToMinute(edit.interruptionEnd);
+    if (startMinute === undefined || endMinute === undefined || endMinute <= startMinute) return [];
+    return [{ id: `interrupt-${item.planId}`, startMinute, durationMinutes: endMinute - startMinute, machineName: edit.interruption === "power-cut" ? "Power cut" : `Breakdown · ${edit.breakdownMachine || "Machine"}` }];
+  }), [timeWiseDayPlan, dailyProductionEdits, activeDayPlanKey]);
+  const calendarMaintenanceAndInterruptions = [...activeDayMaintenanceSlots, ...interruptionAgendaBlocks];
   const processOccupancy = useMemo(() => (data?.machines ?? []).map((machine, machineIndex) => ({
     ...machine,
     values: calendarDays.map((calendarDay) => {
@@ -1027,16 +1081,38 @@ export default function Home() {
   };
   const updateDailyProductionEdit = (dateKey: string, product: Planned, field: keyof DailyProductionEdit, value: number | string) => {
     const key = `${dateKey}:${product.planId}`;
-    setDailyProductionEdits((old) => ({ ...old, [key]: { ...old[key], [field]: value } }));
+    setDailyProductionEdits((old) => {
+      const next = { ...old };
+      // Editing one product must not cause the other products on the same line/day
+      // to be rebalanced. Persist their currently displayed quantities first.
+      if (dateKey === activeDayPlanKey) {
+        timeWiseDayPlan.forEach((item) => {
+          const itemKey = `${dateKey}:${item.planId}`;
+          if (itemKey !== key && next[itemKey]?.plannedQuantity === undefined) next[itemKey] = { ...next[itemKey], plannedQuantity: item.pieces };
+        });
+        if (next[key]?.plannedQuantity === undefined) {
+          const currentItem = timeWiseDayPlan.find((item) => item.planId === product.planId);
+          if (currentItem) next[key] = { ...next[key], plannedQuantity: currentItem.pieces };
+        }
+      }
+      next[key] = { ...next[key], [field]: value, ...(field === "interruption" && value !== "none" ? { interruptionStart: next[key]?.interruptionStart ?? "08:00", interruptionEnd: next[key]?.interruptionEnd ?? "09:00" } : {}) };
+      return next;
+    });
     if (field !== "actualQuantity") return;
     const quantity = Math.max(0, Number(value) || 0);
     const assemblyLine = dailyAssemblyLines[key] ?? assemblyLineForProduct(product);
+    const plannedForDay = dailyProductionEdits[key]?.plannedQuantity ?? timeWiseDayPlan.find((item) => item.planId === product.planId)?.pieces ?? product.planQty;
     setActualProduction((old) => {
       const existing = old.find((item) => item.date === dateKey && item.planId === product.planId);
       if (existing) return old.map((item) => item.id === existing.id ? { ...item, quantity, endOfDayQuantity: quantity, assemblyLine } : item);
       return [...old, { id: crypto.randomUUID(), date: dateKey, planId: product.planId, materialCode: product.materialCode, family: product.family, assemblyLine, quantity, endOfDayQuantity: quantity }];
     });
   };
+  const addDailyInterruption = (dateKey: string) => setDailyInterruptions((old) => ({ ...old, [dateKey]: [...(old[dateKey] ?? []), { id: crypto.randomUUID(), type: "power-cut", start: "08:00", end: "09:00" }] }));
+  const updateDailyInterruption = (dateKey: string, id: string, field: keyof InterruptionRecord, value: string) => setDailyInterruptions((old) => ({ ...old, [dateKey]: (old[dateKey] ?? []).map((record) => record.id === id ? { ...record, [field]: value } : record) }));
+  const removeDailyInterruption = (dateKey: string, id: string) => setDailyInterruptions((old) => ({ ...old, [dateKey]: (old[dateKey] ?? []).filter((record) => record.id !== id) }));
+  const addEmergencyDispatch = (dateKey: string, sourcePlanId: string, quantity: number, assemblyLine: AssemblyLine) => { if (!sourcePlanId || quantity <= 0) return; const source = planned.find((item) => item.planId === sourcePlanId) ?? data?.products.find((item) => `catalog-${item.id}` === sourcePlanId); if (!source) return; const emergencyId = `emergency-${crypto.randomUUID()}`; setPlanned((old) => [...old, { ...source, planId: emergencyId, planQty: quantity, dueDate: dateKey, priority: "High", assemblyLine }]); setEmergencyDispatches((old) => [...old, { id: crypto.randomUUID(), date: dateKey, planId: emergencyId, quantity, assemblyLine }]); };
+  const removeEmergencyDispatch = (id: string) => { const record = emergencyDispatches.find((item) => item.id === id); setEmergencyDispatches((old) => old.filter((item) => item.id !== id)); if (record?.planId.startsWith("emergency-")) setPlanned((old) => old.filter((item) => item.planId !== record.planId)); };
   const updateMachineOwner = (dateKey: string, assemblyLine: AssemblyLine, machineKey: string, field: keyof MachineOwnerEntry, value: string) => {
     const key = `${dateKey}:${assemblyLine}:${machineKey}`;
     setMachineOwners((old) => ({ ...old, [key]: { ...old[key], [field]: value } }));
@@ -1125,6 +1201,12 @@ export default function Home() {
   const resetAssemblyDay = (productionDate: string, line: AssemblyLine) => {
     resetShiftForDate(productionDate);
     setActualProduction((old) => old.filter((record) => record.date !== productionDate || record.assemblyLine !== line));
+    setDailyProductionEdits((old) => Object.fromEntries(Object.entries(old).filter(([key]) => {
+      if (!key.startsWith(`${productionDate}:`)) return true;
+      const planId = key.slice(productionDate.length + 1);
+      const item = planned.find((candidate) => candidate.planId === planId);
+      return (dailyAssemblyLines[key] ?? item?.assemblyLine) !== line;
+    })));
     setScheduleActualDraft({ date: productionDate, planId: "", beforeLunchQuantity: "", endOfDayQuantity: "" });
   };
   const resetFeederDay = (productionDate: string) => {
@@ -1201,6 +1283,66 @@ export default function Home() {
   const sortedActualProduction = [...actualLineProduction].sort((a, b) => b.date.localeCompare(a.date) || a.materialCode.localeCompare(b.materialCode));
   const actualTotal = actualLineProduction.reduce((sum, item) => sum + item.quantity, 0);
   const actualProductCount = new Set(actualLineProduction.map((item) => item.materialCode)).size;
+  const actualFieldChartRows = useMemo(() => {
+    type ChartRow = { materialCode: string; planned: number; actual: number; rework: number; rejection: number; edited: boolean };
+    const rows = new Map<string, ChartRow>();
+    const ensure = (materialCode: string) => {
+      const existing = rows.get(materialCode);
+      if (existing) return existing;
+      const created: ChartRow = { materialCode, planned: 0, actual: 0, rework: 0, rejection: 0, edited: false };
+      rows.set(materialCode, created);
+      return created;
+    };
+    schedule.filter((item) => item.assemblyLine === actualLine).forEach((item) => {
+      ensure(item.materialCode).planned += item.requestedPlanQty;
+    });
+    Object.entries(dailyProductionEdits).forEach(([key, edit]) => {
+      const [dateKey, planId] = key.split(":");
+      if (!dateKey || !planId || dateKey < startDate || dateKey > endDate) return;
+      const item = schedule.find((candidate) => candidate.planId === planId);
+      if (!item || item.assemblyLine !== actualLine) return;
+      const row = ensure(item.materialCode);
+      if (edit.plannedQuantity !== undefined) {
+        if (!row.edited) row.planned = 0;
+        row.planned += edit.plannedQuantity;
+      }
+      row.rework += edit.reworkQuantity ?? 0;
+      row.rejection += edit.rejectionQuantity ?? 0;
+      row.edited = true;
+    });
+    actualLineProduction.forEach((record) => {
+      const row = ensure(record.materialCode);
+      row.actual += record.quantity;
+    });
+    const productRows = Array.from(rows.values()).filter((row) => row.planned || row.actual || row.rework || row.rejection).filter((row) => actualChartProduct === "ALL" || row.materialCode === actualChartProduct).slice(0, 20);
+    const grouped = new Map<string, ChartRow>();
+    const selectedSchedule = actualChartProduct === "ALL" ? actualLineSchedule : actualLineSchedule.filter((item) => item.materialCode === actualChartProduct);
+    actualVsPlannedByDay.forEach((day) => {
+      const selectedPlanned = actualChartProduct === "ALL" ? day.plannedPieces : (day.off ? 0 : selectedSchedule.reduce((sum, item) => {
+        if (day.value < item.start || day.value > item.finish) return sum;
+        const dayStartSeconds = elapsedCapacityBeforeDate(day.value, actualLine);
+        const dayCapacitySeconds = productiveSecondsForDate(day.value, actualLine);
+        const overlapSeconds = Math.max(0, Math.min(item.finishOffsetSeconds, dayStartSeconds + dayCapacitySeconds) - Math.max(item.startOffsetSeconds, dayStartSeconds));
+        return sum + (overlapSeconds > 0 ? Math.max(1, Math.round(overlapSeconds / Math.max(1, item.effectiveBottleneckSeconds))) : 0);
+      }, 0));
+      const selectedActual = actualChartProduct === "ALL" ? day.actualPieces : actualLineProduction.filter((record) => record.materialCode === actualChartProduct && record.date === day.key).reduce((sum, record) => sum + record.quantity, 0);
+      if (actualChartGranularity === "date" && day.key !== activeActualChartDate) return;
+      const key = actualChartGranularity === "date" ? day.key : actualChartGranularity === "month" ? day.key.slice(0, 7) : (() => { const d = new Date(day.value); d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); return localDateKey(d); })();
+      if (actualChartGranularity === "week" && actualSelectedWeek !== "ALL" && key !== actualSelectedWeek) return;
+      const label = actualChartGranularity === "week" ? `Week of ${key}` : key;
+      const row = grouped.get(key) ?? { materialCode: label, planned: 0, actual: 0, rework: 0, rejection: 0, edited: false };
+      row.planned += selectedPlanned; row.actual += selectedActual;
+      Object.entries(dailyProductionEdits).forEach(([editKey, edit]) => {
+        const [editDate, editPlanId] = editKey.split(":");
+        const editItem = selectedSchedule.find((item) => item.planId === editPlanId);
+        if (editDate === day.key && editItem) { row.rework += edit.reworkQuantity ?? 0; row.rejection += edit.rejectionQuantity ?? 0; }
+      });
+      grouped.set(key, row);
+    });
+    return Array.from(grouped.values());
+  }, [schedule, actualLine, actualLineSchedule, actualLineProduction, dailyProductionEdits, startDate, endDate, actualChartProduct, actualChartGranularity, actualSelectedWeek, activeActualChartDate, actualVsPlannedByDay, calendarDays]);
+  const actualFieldChartPeak = Math.max(1, ...actualFieldChartRows.flatMap((row) => [row.planned, row.actual, row.rework, row.rejection]));
+  const actualColumnChartWidth = Math.max(900, actualFieldChartRows.length * 170 + 100);
   const actualByPlanAndDate = new Map<string, number>();
   const actualByPlan = new Map<string, number>();
   actualProduction.forEach((record) => {
@@ -1430,6 +1572,9 @@ export default function Home() {
   if (!authChecked) return <main className="loading"><div className="loader"/><p>Checking Google login…</p></main>;
   if (!authUser) return <main className="auth-gate"><div className="auth-gate-card"><img src="/brand/ideal-logo-1.jpg" alt="Ideal Gas Springs" /><p className="eyebrow">IDEAL LINEPILOT · MES &amp; DIGITAL TWIN</p><h1>Sign in to Production Planner</h1><p>Production plans, actuals, machine owners and digital-twin data are available to authorized users only.</p><a className="auth-button auth-google-button" href="/api/auth/google">Continue with Google</a><small>Use your authorized Google Workspace account.</small></div></main>;
   if (!data) return <main className="loading"><div className="loader"/><p>Preparing production data…</p></main>;
+  const emergencyProductOptions = [...planned, ...data.products.map((product) => ({ ...product, planId: `catalog-${product.id}`, planQty: product.orderQty, dueDate: startDate, priority: "Normal" as const }))].filter((product, index, list) => list.findIndex((candidate) => candidate.materialCode.trim().toUpperCase() === product.materialCode.trim().toUpperCase()) === index).filter((product) => !emergencySearch.trim() || product.materialCode.toLowerCase().includes(emergencySearch.trim().toLowerCase()));
+  const assemblyCalendarHours = Math.max(10, Math.ceil(dailyShiftHours[activeDayPlanKey] ?? hours));
+  const feederCalendarHours = Math.max(10, Math.ceil(dailyShiftHours[activeFeederDayPlanKey] ?? hours));
 
   return <main>
     <header className="topbar">
@@ -1467,19 +1612,26 @@ export default function Home() {
           <div className="holiday-panel"><div><span>NON-WORKING DAYS</span><b>Planning-period holiday list</b><small>Every Tuesday is a default holiday. Sundays are working days.</small></div><div className="holiday-controls"><input aria-label="Holiday date" type="date" min={startDate} max={endDate} value={holidayDraft} onChange={(e) => setHolidayDraft(e.target.value)} /><button onClick={addHoliday} disabled={!holidayDraft}>Add holiday</button></div><div className="holiday-list"><span className="default-holiday"><b>All Tuesdays</b><em>Default</em></span>{holidays.filter((holiday) => holiday >= startDate && holiday <= endDate).length === 0 && <em>No additional holidays</em>}{holidays.filter((holiday) => holiday >= startDate && holiday <= endDate).map((holiday) => <span key={holiday}><b>{dayName.format(new Date(`${holiday}T00:00:00`))}</b><button aria-label={`Remove holiday ${holiday}`} onClick={() => setHolidays((old) => old.filter((item) => item !== holiday))}>×</button></span>)}</div></div>
           <div className="plan-table"><div className="tr th"><span>SEQ</span><span>MATERIAL / FAMILY</span><span>PLAN QTY</span><span>DUE DATE</span><span>BOTTLENECK</span><span>LOAD</span><span></span></div>
             {planned.length === 0 && <div className="empty">Add products from the demand pool to create the production plan.</div>}
-            {planned.map((p, i) => { const productLine = assemblyLineForFamily(p.family); const processes = p.cycleTimes.map((seconds, index) => { const machine = data.machines[index]; const booths = index >= ASSEMBLY_START_INDEX ? configuredBooths(stationBooths, machine?.key ?? "", index, productLine) : 1; return { machine, booths, effectiveSeconds: index >= ASSEMBLY_START_INDEX ? seconds / booths : 0 }; }); const bottleneck = processes.reduce<(typeof processes)[number] | null>((slowest, process) => process.effectiveSeconds > 0 && (!slowest || process.effectiveSeconds > slowest.effectiveSeconds) ? process : slowest, null); const lineDays = p.planQty * (bottleneck?.effectiveSeconds ?? 0) / availableSeconds; return <div className="tr" key={p.planId}><span className="seq">{String(i + 1).padStart(2, "0")}</span><span><b>{p.materialCode}</b><small><i className={`family f${p.family}`}>{p.family}</i><i className={`line-badge ${productLine.toLowerCase()}`}>{productLine}</i>{p.segment}</small></span><span><input aria-label={`Quantity for ${p.materialCode}`} type="number" value={p.planQty} onChange={(e) => updatePlan(p.planId, "planQty", +e.target.value)} /></span><span><input aria-label={`Due date for ${p.materialCode}`} type="date" min={startDate} max={endDate} value={p.dueDate} onChange={(e) => updateDueDate(p.planId, e.target.value)} /></span><span><b>{bottleneck?.machine?.name ?? "—"}</b><small>{bottleneck?.effectiveSeconds.toFixed(1) ?? "0.0"} effective sec / piece · {bottleneck?.booths ?? 1} booth{bottleneck?.booths === 1 ? "" : "s"}</small></span><span><b>{lineDays.toFixed(2)} d</b><small>{((lineDays / workingDays) * 100).toFixed(1)}% period</small></span><button className="remove" aria-label={`Remove ${p.materialCode}`} onClick={() => setPlanned((old) => old.filter((x) => x.planId !== p.planId))}>×</button></div>})}
+            {planned.map((p, i) => { const productLine = assemblyLineForProduct(p); const processes = p.cycleTimes.map((seconds, index) => { const machine = data.machines[index]; const booths = index >= ASSEMBLY_START_INDEX ? configuredBooths(stationBooths, machine?.key ?? "", index, productLine) : 1; return { machine, booths, effectiveSeconds: index >= ASSEMBLY_START_INDEX ? seconds / booths : 0 }; }); const bottleneck = processes.reduce<(typeof processes)[number] | null>((slowest, process) => process.effectiveSeconds > 0 && (!slowest || process.effectiveSeconds > slowest.effectiveSeconds) ? process : slowest, null); const lineDays = p.planQty * (bottleneck?.effectiveSeconds ?? 0) / availableSeconds; return <div className="tr" key={p.planId}><span className="seq">{String(i + 1).padStart(2, "0")}</span><span><b>{p.materialCode}</b><small><i className={`family f${p.family}`}>{p.family}</i><select className="plan-line-select" aria-label="Assembly line" value={productLine} onChange={(event) => updateProductAssemblyLine(p, event.target.value as AssemblyLine)}><option value="AL1">AL1</option><option value="AL2">AL2</option></select>{p.segment}</small></span><span><input aria-label={`Quantity for ${p.materialCode}`} type="number" value={p.planQty} onChange={(e) => updatePlan(p.planId, "planQty", +e.target.value)} /></span><span><input aria-label={`Due date for ${p.materialCode}`} type="date" min={startDate} max={endDate} value={p.dueDate} onChange={(e) => updateDueDate(p.planId, e.target.value)} /></span><span><b>{bottleneck?.machine?.name ?? "—"}</b><small>{bottleneck?.effectiveSeconds.toFixed(1) ?? "0.0"} effective sec / piece · {bottleneck?.booths ?? 1} booth{bottleneck?.booths === 1 ? "" : "s"}</small></span><span><b>{lineDays.toFixed(2)} d</b><small>{((lineDays / workingDays) * 100).toFixed(1)}% period</small></span><button className="remove" aria-label={`Remove ${p.materialCode}`} onClick={() => setPlanned((old) => old.filter((x) => x.planId !== p.planId))}>×</button></div>})}
           </div>
           <div className={`feeder-release-note ${feederCapacityOk ? "ready" : "late"}`}><div><span>ONE-MONTH-PRIOR FEEDER RELEASE</span><b>Tube Shop planned in {feederCalendarLabel}</b><small>Assembly schedule starts on Working Day 1: {dayName.format(assemblyReleaseDate)} · Tube Shop estimated ready: {dayName.format(feederReadyDate)}{feederHasOverflow ? ` · ${fmt.format(feederOverflowQuantity)} pcs continue in ${feederNextMonthLabel}` : ""}</small></div><button onClick={() => setTab("feeder")}>Open feeder plan</button></div>
         </>}
 
         {tab === "actual" && <>
+          {actualChartGranularity === "date" && <div className="actual-chart-date-picker"><b>Select production date</b><div>{actualChartDateOptions.map((dateKey) => <button type="button" className={activeActualChartDate === dateKey ? "active" : ""} key={`chart-date-${dateKey}`} onClick={() => setActualSelectedDate(dateKey)}>{new Date(`${dateKey}T00:00:00`).toLocaleDateString("en-IN", { day: "2-digit", month: "short" })}</button>)}</div></div>}
+          <section className="actual-column-chart"><header><b>{actualChartGranularity === "week" ? "Weekly" : actualChartGranularity === "month" ? "Monthly" : "Date-wise"} production comparison</b><span>Blue Planned · Orange Actual · Gray Rework · Green Rejection</span></header><div className="actual-column-scroll"><svg viewBox={`0 0 ${actualColumnChartWidth} 300`} role="img" aria-label="Grouped production comparison chart"><line x1="30" y1="250" x2={actualColumnChartWidth - 30} y2="250" />{actualFieldChartRows.map((row, index) => { const groupX = 55 + index * 170; const scale = (value: number) => (value / actualFieldChartPeak) * 210; return <g key={"column-" + row.materialCode}><rect x={groupX} y={250 - scale(row.planned)} width="20" height={scale(row.planned)} fill="#5b9bd5"><title>{row.materialCode} · Planned: {fmt.format(row.planned)} pcs</title></rect><rect x={groupX + 28} y={250 - scale(row.actual)} width="20" height={scale(row.actual)} fill="#ed7d31"><title>{row.materialCode} · Actual: {fmt.format(row.actual)} pcs</title></rect><rect x={groupX + 56} y={250 - scale(row.rework)} width="20" height={scale(row.rework)} fill="#a5a5a5"><title>{row.materialCode} · Rework: {fmt.format(row.rework)} pcs</title></rect><rect x={groupX + 84} y={250 - scale(row.rejection)} width="20" height={scale(row.rejection)} fill="#70ad47"><title>{row.materialCode} · Rejection: {fmt.format(row.rejection)} pcs</title></rect><text x={groupX + 42} y="274" textAnchor="middle">{row.materialCode.length > 14 ? row.materialCode.slice(0, 12) + "…" : row.materialCode}</text></g>;})}</svg></div></section>
+          <section className="actual-chart-data-table"><header><b>Production data</b><span>{actualChartGranularity === "week" && actualSelectedWeek !== "ALL" ? `Week of ${actualSelectedWeek}` : actualChartGranularity === "month" ? "Month-wise totals" : actualChartGranularity === "week" ? "Weekly totals" : "Date-wise totals"}</span></header><div className="actual-chart-data-head"><span>PERIOD / PRODUCT</span><span>PLANNED</span><span>ACTUAL</span><span>REWORK</span><span>REJECTION</span></div>{actualFieldChartRows.map((row) => <div className="actual-chart-data-row" key={`actual-data-${row.materialCode}`}><b>{row.materialCode}</b><span>{fmt.format(row.planned)} pcs</span><span>{fmt.format(row.actual)} pcs</span><span>{fmt.format(row.rework)} pcs</span><span>{fmt.format(row.rejection)} pcs</span></div>)}</section>
+          <label className="actual-chart-product-select">Chart product<select value={actualChartProduct} onChange={(event) => setActualChartProduct(event.target.value)}><option value="ALL">All products</option>{Array.from(new Set(planned.filter((product) => assemblyLineForProduct(product) === actualLine).map((product) => product.materialCode))).map((materialCode) => <option value={materialCode} key={`chart-product-${materialCode}`}>{materialCode}</option>)}</select></label>
+          <label className="actual-chart-product-select">View by<select value={actualChartGranularity} onChange={(event) => setActualChartGranularity(event.target.value as "date" | "week" | "month")}><option value="date">Date-wise</option><option value="week">Week-wise</option><option value="month">Month-wise</option></select></label>
+          {actualChartGranularity === "week" && <label className="actual-chart-product-select">Select week<select value={actualSelectedWeek} onChange={(event) => setActualSelectedWeek(event.target.value)}><option value="ALL">All weeks</option>{Array.from(new Set(calendarDays.map((day) => { const d = new Date(day.value); d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); return localDateKey(d); }))).map((week) => <option value={week} key={`chart-week-${week}`}>Week of {week}</option>)}</select></label>}
           <div className="panel-head"><div><span>SHOP-FLOOR OUTPUT · DATE WISE</span><h2>Actual production</h2></div><p>Saved automatically to the active planning period</p></div>
           <div className="schedule-line-selector actual-line-selector"><div><span>SELECT ASSEMBLY LINE</span><b>Enter and compare actual production independently</b></div><div><button type="button" className={actualLine === "AL1" ? "active al1" : ""} onClick={() => { setActualLine("AL1"); setActualDraft((old) => ({ ...old, planId: "" })); }}><strong>AL1</strong><small>615 family</small></button><button type="button" className={actualLine === "AL2" ? "active al2" : ""} onClick={() => { setActualLine("AL2"); setActualDraft((old) => ({ ...old, planId: "" })); }}><strong>AL2</strong><small>818 &amp; 1021 families</small></button></div></div>
+          <section className="actual-field-chart"><header><div><span>{actualLine} · PRODUCTION QUALITY</span><h3>Planned vs actual production</h3><p>Product-wise quantities from daily production entries</p></div><div className="actual-field-legend"><i className="planned" />Planned<i className="actual" />Actual<i className="rework" />Rework<i className="rejection" />Rejection</div></header>{actualFieldChartRows.length === 0 ? <div className="empty">Add daily production quantities to populate this chart.</div> : <div className="actual-bars">{actualFieldChartRows.map((row) => <div className="actual-bar-row" key={`actual-bars-${row.materialCode}`}><b>{row.materialCode}</b><div className="actual-bar-values"><span className="bar planned" style={{ width: `${Math.max(1, row.planned / actualFieldChartPeak * 100)}%` }} title={`Planned: ${fmt.format(row.planned)} pcs`}><em>{fmt.format(row.planned)}</em></span><span className="bar actual" style={{ width: `${Math.max(row.actual ? 1 : 0, row.actual / actualFieldChartPeak * 100)}%` }} title={`Actual: ${fmt.format(row.actual)} pcs`}><em>{fmt.format(row.actual)}</em></span><span className="bar rework" style={{ width: `${Math.max(row.rework ? 1 : 0, row.rework / actualFieldChartPeak * 100)}%` }} title={`Rework: ${fmt.format(row.rework)} pcs`}><em>{fmt.format(row.rework)}</em></span><span className="bar rejection" style={{ width: `${Math.max(row.rejection ? 1 : 0, row.rejection / actualFieldChartPeak * 100)}%` }} title={`Rejection: ${fmt.format(row.rejection)} pcs`}><em>{fmt.format(row.rejection)}</em></span></div></div>)}</div>}</section>
         </>}
 
         {tab === "schedule" && <>
           <div className="panel-head"><div><span>DATE-WISE EXECUTION PLAN</span><h2>Production schedule</h2></div><div className="settings"><label>Shift hours<input type="number" value={hours} min="1" max="24" onChange={(e) => setHours(+e.target.value)} /></label><label>Baseline OEE %<input type="number" value={efficiency} min="10" max="100" onChange={(e) => setEfficiency(+e.target.value)} /></label></div></div>
-          <div className="schedule-line-selector"><div><span>SELECT PRODUCTION AREA</span><b>View an independent schedule and production chart</b></div><div><button className={scheduleView === "AL1" ? "active al1" : ""} onClick={() => { setScheduleView("AL1"); setScheduleLine("AL1"); setScheduleActualDraft((old) => ({ ...old, planId: "" })); }}><strong>AL1</strong><small>615 family</small></button><button className={scheduleView === "AL2" ? "active al2" : ""} onClick={() => { setScheduleView("AL2"); setScheduleLine("AL2"); setScheduleActualDraft((old) => ({ ...old, planId: "" })); }}><strong>AL2</strong><small>818 &amp; 1021 families</small></button><button className={scheduleView === "FEEDER" ? "active feeder" : ""} onClick={() => setScheduleView("FEEDER")}><strong>FEEDER SHOP</strong><small>PC Tube Store</small></button></div></div>
+          <div className="schedule-line-selector"><div><span>SELECT PRODUCTION AREA</span><b>View an independent schedule and production chart</b></div><label className="schedule-line-dropdown">Assembly line<select value={scheduleLine} onChange={(event) => { const nextLine = event.target.value as AssemblyLine; setScheduleLine(nextLine); setScheduleView(nextLine); setScheduleActualDraft((old) => ({ ...old, planId: "" })); }}><option value="AL1">AL1 · 615 family</option><option value="AL2">AL2 · 818 / 1021 families</option></select></label><div><button className={scheduleView === "AL1" ? "active al1" : ""} onClick={() => { setScheduleView("AL1"); setScheduleLine("AL1"); setScheduleActualDraft((old) => ({ ...old, planId: "" })); }}><strong>AL1</strong><small>615 family</small></button><button className={scheduleView === "AL2" ? "active al2" : ""} onClick={() => { setScheduleView("AL2"); setScheduleLine("AL2"); setScheduleActualDraft((old) => ({ ...old, planId: "" })); }}><strong>AL2</strong><small>818 &amp; 1021 families</small></button><button className={scheduleView === "FEEDER" ? "active feeder" : ""} onClick={() => setScheduleView("FEEDER")}><strong>FEEDER SHOP</strong><small>PC Tube Store</small></button></div></div>
         </>}
 
         {(tab === "feeder" || (tab === "schedule" && scheduleView === "FEEDER")) && <>
@@ -1505,8 +1657,8 @@ export default function Home() {
               <aside className="working-day-list" aria-label="Tube Shop working days">{feederTimeWiseWorkingDays.map((day) => <button type="button" className={activeFeederDayPlanKey === day.key ? "active" : ""} onClick={() => { setSelectedFeederDayPlanDate(day.key); setFeederActualDraft({ date: day.key, planId: "", beforeLunchQuantity: "", endOfDayQuantity: "" }); }} key={`feeder-time-day-${day.key}`}><time>{day.value.getDate()}</time><span><b>{day.value.toLocaleDateString("en-IN", { weekday: "long" })}</b><small>{day.value.toLocaleDateString("en-IN", { month: "short", year: "numeric" })}</small></span><i>›</i></button>)}</aside>
               <div className="day-agenda">
                 <div className="agenda-title"><div><span>{activeFeederDayPlan?.value.toLocaleDateString("en-IN", { weekday: "long" })}</span><h4>{activeFeederDayPlan?.value.toLocaleDateString("en-IN", { day: "2-digit", month: "long", year: "numeric" })}</h4></div><div className="agenda-shift-actions"><strong>TUBE SHOP · {fmt.format(activeFeederDayPlan?.total ?? 0)} planned · {fmt.format(activeFeederActualTotal)} actual</strong><span>{dailyShiftHours[activeFeederDayPlanKey] ?? hours}h shift · {efficiency}% OEE</span><button type="button" onClick={() => resetFeederDay(activeFeederDayPlanKey)}>Reset shift &amp; quantities</button></div></div>
-                <div className="outlook-day" style={{ height: `${Math.max(770, ...feederTimeWiseAgendaBlocks.map((item) => 110 + Math.max(0, item.endMinute - 8 * 60) * 1.2))}px` }}>
-                  {Array.from({ length: 10 }, (_, index) => { const minute = 8 * 60 + index * 60; return <div className="outlook-hour" style={{ top: `${20 + index * 72}px` }} key={`feeder-hour-${minute}`}><time>{clockMinuteLabel(minute)}</time><i /></div>; })}
+                <div className="outlook-day" style={{ height: `${Math.max(770, 22 + feederCalendarHours * 72 + 100)}px`, overflowY: "auto" }}>
+                  {Array.from({ length: feederCalendarHours + 1 }, (_, index) => { const minute = 8 * 60 + index * 60; return <div className="outlook-hour" style={{ top: `${20 + index * 72}px` }} key={`feeder-hour-${minute}`}><time>{clockMinuteLabel(minute)}</time><i /></div>; })}
                   {feederTimeWiseDayPlan.length === 0 && <div className="agenda-empty outlook-empty"><b>No Tube Shop production planned</b><span>This feeder working day is available.</span></div>}
                   {feederTimeWiseAgendaBlocks.map((item) => { const top = 22 + Math.max(0, item.startMinute - 8 * 60) * 1.2; const height = Math.max(48, (item.endMinute - item.startMinute) * 1.2 - 5); const isFirstSegment = item.startMinute === item.clockStartMinute; const isLastSegment = item.endMinute === item.clockEndMinute; const afterTea = item.startMinute === 16 * 60 + 10; const checkpointKey = `${activeFeederDayPlanKey}:${item.planId}`; const savedCheckpoint = feederShiftActual[checkpointKey]; const isEditing = feederActualDraft.date === activeFeederDayPlanKey && feederActualDraft.planId === item.planId; const recordedActual = savedCheckpoint?.endOfDayQuantity ?? savedCheckpoint?.beforeLunchQuantity ?? 0; return <article className={`agenda-production outlook-event ${isFirstSegment || isLastSegment ? "has-actual-entry" : ""} ${afterTea ? "end-checkpoint-segment" : ""}`} style={{ top: `${top}px`, height: `${height}px` }} key={`feeder-agenda-${activeFeederDayPlanKey}-${item.planId}-${item.windowIndex}`}><time><b>{clockMinuteLabel(item.startMinute)}</b><small>{clockMinuteLabel(item.endMinute)}</small></time><div><span>TUBE SHOP PRODUCTION{item.startMinute > item.clockStartMinute ? " · CONTINUED" : ""}</span><h5>{item.materialCode}</h5><p>{item.historicalActual ? `${fmt.format(item.segmentQuantity)} completed` : `${fmt.format(item.segmentQuantity)} planned`} · {fmt.format(recordedActual)} actual · {item.bottleneckName}</p></div>{(isFirstSegment || isLastSegment) && <div className="calendar-actual-control">{isEditing ? <form onSubmit={saveFeederShiftActual}>{isFirstSegment ? <input autoFocus aria-label={`Tube Shop before lunch actual for ${item.materialCode}`} type="number" inputMode="numeric" min="0" step="1" placeholder="Before lunch" value={feederActualDraft.beforeLunchQuantity} onChange={(event) => setFeederActualDraft((old) => ({ ...old, date: activeFeederDayPlanKey, planId: item.planId, beforeLunchQuantity: event.target.value }))} /> : <input autoFocus aria-label={`Tube Shop end-of-day actual for ${item.materialCode}`} type="number" inputMode="numeric" min="0" step="1" placeholder="End-of-day" value={feederActualDraft.endOfDayQuantity} onChange={(event) => setFeederActualDraft((old) => ({ ...old, date: activeFeederDayPlanKey, planId: item.planId, endOfDayQuantity: event.target.value }))} />}<button type="submit">Save</button><button type="button" className="cancel" onClick={() => setFeederActualDraft({ date: activeFeederDayPlanKey, planId: "", beforeLunchQuantity: "", endOfDayQuantity: "" })}>×</button></form> : <button type="button" onClick={() => setFeederActualDraft({ date: activeFeederDayPlanKey, planId: item.planId, beforeLunchQuantity: savedCheckpoint?.beforeLunchQuantity ? String(savedCheckpoint.beforeLunchQuantity) : "", endOfDayQuantity: savedCheckpoint?.endOfDayQuantity ? String(savedCheckpoint.endOfDayQuantity) : "" })}><b>{isFirstSegment ? (savedCheckpoint?.beforeLunchQuantity === undefined ? "+ Add before lunch" : "Edit before lunch") : (savedCheckpoint?.endOfDayQuantity === undefined ? "+ Add end-of-day" : "Edit end-of-day")}</b><small>{isFirstSegment ? "Tube Shop midday checkpoint" : "Tube Shop shift-end checkpoint"}</small></button>}</div>}</article>; })}
                   <div className="agenda-break lunch outlook-break" style={{ top: `${22 + (12.5 * 60 - 8 * 60) * 1.2}px`, height: "36px" }}><time>12:30 PM</time><span><b>Lunch break</b><small>30 minutes · resumes 1:00 PM</small></span></div>
@@ -1570,16 +1722,18 @@ export default function Home() {
                     const editedPlanQuantity = dailyProductionEdits[`${day.key}:${item.planId}`]?.plannedQuantity;
                     if (editedPlanQuantity !== undefined) return sum + Math.max(0, editedPlanQuantity);
                     const assignedCycleSeconds = Math.max(1, ...item.cycleTimes.map((seconds, index) => index >= ASSEMBLY_START_INDEX && seconds > 0 ? seconds / planningBooths(stationBooths, data?.machines[index]?.key ?? "", index) : 0));
-                    const active = day.value >= item.start && day.value <= item.finish;
-                    const overlapSeconds = active ? Math.max(0, Math.min(item.finishOffsetSeconds, dayStartSeconds + dayCapacitySeconds) - Math.max(item.startOffsetSeconds, dayStartSeconds)) : 0;
-                    return sum + (overlapSeconds > 0 ? Math.max(1, Math.floor(overlapSeconds / assignedCycleSeconds)) : 0);
+                    const movedForDay = dailyAssemblyLines[`${day.key}:${item.planId}`] !== undefined && dailyAssemblyLines[`${day.key}:${item.planId}`] !== item.assemblyLine;
+                    const active = movedForDay ? assignedLine === scheduleLine : day.value >= item.start && day.value <= item.finish;
+                    const overlapSeconds = movedForDay ? dayCapacitySeconds : (active ? Math.max(0, Math.min(item.finishOffsetSeconds, dayStartSeconds + dayCapacitySeconds) - Math.max(item.startOffsetSeconds, dayStartSeconds)) : 0);
+                    return sum + (overlapSeconds > 0 ? Math.min(item.requestedPlanQty, Math.max(1, Math.floor(overlapSeconds / assignedCycleSeconds))) : 0);
                   }, 0);
                   const actualPieces = group.items.reduce((sum, item) => (dailyAssemblyLines[`${day.key}:${item.planId}`] ?? item.assemblyLine) === scheduleLine ? sum + (actualByPlanAndDate.get(`${item.planId}:${day.key}`) ?? 0) : sum, 0);
                   const active = plannedPieces > 0;
                   return <div className={`line-chart-cell ${day.off ? "off" : active ? "active" : ""} ${actualPieces ? "has-actual" : ""}`} title={`${group.materialCode} · ${dayName.format(day.value)} · ${fmt.format(plannedPieces)} planned · ${fmt.format(actualPieces)} actual`} key={`${group.materialCode}-${day.key}`}>{active ? <i><b>{fmt.format(plannedPieces)}</b><small>plan</small></i> : null}{actualPieces > 0 && <strong className="actual-cell-value"><b>{fmt.format(actualPieces)}</b><small>actual</small></strong>}</div>;
                 })];
               })}
-              {selectedLineCalendarRows.length === 0 && <div className="line-chart-empty" style={{ gridColumn: `1 / span ${daysInMonth + 1}` }}>No products are planned for {scheduleLine}.</div>}
+              {emergencyDispatches.filter((record) => !planned.some((item) => item.planId === record.planId) && (record.assemblyLine ?? "AL1") === scheduleLine).map((record) => { const source = planned.find((item) => item.planId === record.planId) ?? data.products.find((item) => `catalog-${item.id}` === record.planId); if (!source) return null; return [<div className="line-chart-product emergency-calendar-row" key={`emergency-label-${record.id}`}><b>{source.materialCode}</b><small>Emergency dispatch · {fmt.format(record.quantity)} planned</small><em>{scheduleLine}</em></div>, ...calendarDays.map((day) => { const active = !day.off && day.key === record.date; return <div className={`line-chart-cell ${day.off ? "off" : active ? "active" : ""}`} title={`${source.materialCode} · ${dayName.format(day.value)} · ${active ? fmt.format(record.quantity) : 0} emergency planned`} key={`emergency-${record.id}-${day.key}`}>{active && <i><b>{fmt.format(record.quantity)}</b><small>plan</small></i>}</div>; })]; })}
+              {selectedLineCalendarRows.length === 0 && emergencyDispatches.filter((record) => (record.assemblyLine ?? "AL1") === scheduleLine).length === 0 && <div className="line-chart-empty" style={{ gridColumn: `1 / span ${daysInMonth + 1}` }}>No products are planned for {scheduleLine}.</div>}
             </div></div>
           </section>
           <section className={`time-wise-planner ${scheduleLine.toLowerCase()}`}>
@@ -1592,15 +1746,20 @@ export default function Home() {
                 <div className="agenda-title"><div><span>{activeDayPlanDate.toLocaleDateString("en-IN", { weekday: "long" })}</span><h4>{activeDayPlanDate.toLocaleDateString("en-IN", { day: "2-digit", month: "long", year: "numeric" })}</h4></div><div className="agenda-shift-actions"><strong>{scheduleLine} · {timeWiseDayPlan.reduce((sum, item) => sum + item.pieces, 0).toLocaleString("en-IN")} pcs planned</strong><span>{dailyShiftHours[activeDayPlanKey] ?? hours}h shift</span><button type="button" onClick={() => resetAssemblyDay(activeDayPlanKey, scheduleLine)}>Reset shift &amp; quantities</button></div></div>
                 <div className="print-day-heading"><span>LINEPILOT · DAILY PRODUCTION PLAN</span><h2>{scheduleLine} · {activeDayPlanDate.toLocaleDateString("en-IN", { weekday: "long", day: "2-digit", month: "long", year: "numeric" })}</h2><p>Shift: {dailyShiftHours[activeDayPlanKey] ?? hours} hours · OEE: {efficiency}% · Planned: {fmt.format(timeWiseDayPlan.reduce((sum, item) => sum + item.pieces, 0))} pieces</p></div>
                 <div className="print-day-actions"><button type="button" onClick={() => window.print()}>Print day plan</button></div>
-                <div className="day-plan-subtabs"><button type="button" className={scheduleDayView === "plan" ? "active" : ""} onClick={() => setScheduleDayView("plan")}>Day plan</button><button type="button" className={scheduleDayView === "breakdown" ? "active" : ""} onClick={() => setScheduleDayView("breakdown")}>Breakdown and Maintenance</button></div>
-                <div className="daily-line-editors"><div><span>CHANGE ASSEMBLY LINE FOR THIS DAY</span><small>Select a destination line for each product planned on {activeDayPlanDate.toLocaleDateString("en-IN", { day: "2-digit", month: "short" })}</small></div>{timeWiseDayPlan.map((item) => <label key={`daily-line-${activeDayPlanKey}-${item.planId}`}><b>{item.materialCode}</b><select aria-label={`Assembly line for ${item.materialCode} on ${activeDayPlanKey}`} value={dailyAssemblyLines[`${activeDayPlanKey}:${item.planId}`] ?? item.assemblyLine} onChange={(event) => updateDailyAssemblyLine(activeDayPlanKey, item.planId, event.target.value as AssemblyLine)}><option value="AL1">Move to AL1</option><option value="AL2">Move to AL2</option></select></label>)}</div>
-                {scheduleDayView === "breakdown" && <section className="daily-shop-floor-entry"><header><div><span>EDITABLE DAILY PRODUCTION &amp; END-OF-SHIFT ENTRY</span><b>Plan, output, quality, manpower and interruptions</b></div><small>Saved automatically</small></header>{timeWiseDayPlan.map((item) => { const editKey = `${activeDayPlanKey}:${item.planId}`; const edit = dailyProductionEdits[editKey] ?? {}; return <article key={`daily-entry-${editKey}`}><div className="daily-entry-product"><b>{item.materialCode}</b><small>{dailyAssemblyLines[editKey] ?? item.assemblyLine} · cycle-based plan</small></div><label>Planned qty<input type="number" inputMode="numeric" min="0" step="1" value={edit.plannedQuantity ?? item.pieces} onChange={(event) => updateDailyProductionEdit(activeDayPlanKey, item, "plannedQuantity", Math.max(0, Math.trunc(+event.target.value || 0)))} /></label><label>Actual qty<input type="number" inputMode="numeric" min="0" step="1" placeholder="End of shift" value={edit.actualQuantity ?? ""} onChange={(event) => updateDailyProductionEdit(activeDayPlanKey, item, "actualQuantity", Math.max(0, Math.trunc(+event.target.value || 0)))} /></label><label>Rework qty<input type="number" inputMode="numeric" min="0" step="1" value={edit.reworkQuantity ?? ""} onChange={(event) => updateDailyProductionEdit(activeDayPlanKey, item, "reworkQuantity", Math.max(0, Math.trunc(+event.target.value || 0)))} /></label><label>Rejection qty<input type="number" inputMode="numeric" min="0" step="1" value={edit.rejectionQuantity ?? ""} onChange={(event) => updateDailyProductionEdit(activeDayPlanKey, item, "rejectionQuantity", Math.max(0, Math.trunc(+event.target.value || 0)))} /></label><label>Manpower<input type="number" inputMode="numeric" min="0" step="1" placeholder="Operators" value={edit.manpower ?? ""} onChange={(event) => updateDailyProductionEdit(activeDayPlanKey, item, "manpower", Math.max(0, Math.trunc(+event.target.value || 0)))} /></label><label>Interruption<select value={edit.interruption ?? "none"} onChange={(event) => updateDailyProductionEdit(activeDayPlanKey, item, "interruption", event.target.value)}><option value="none">No interruption</option><option value="breakdown">Machine breakdown</option><option value="power-cut">Power cut</option></select></label><label>Downtime (min)<input type="number" inputMode="numeric" min="0" step="1" disabled={!edit.interruption || edit.interruption === "none"} value={edit.downtimeMinutes ?? ""} onChange={(event) => updateDailyProductionEdit(activeDayPlanKey, item, "downtimeMinutes", Math.max(0, Math.trunc(+event.target.value || 0)))} /></label></article>; })}</section>}
+                <div className="day-plan-subtabs"><button type="button" className={scheduleDayView === "plan" ? "active" : ""} onClick={() => { setScheduleDayView("plan"); setActualPanelOpen(false); }}>Day plan</button><button type="button" className={actualPanelOpen ? "active" : ""} onClick={() => { setScheduleDayView("breakdown"); setActualPanelOpen(true); }}>Actual production data</button><button type="button" className={!actualPanelOpen && scheduleDayView === "breakdown" ? "active" : ""} onClick={() => { setScheduleDayView("breakdown"); setActualPanelOpen(false); }}>Breakdown and Maintenance</button></div>
+                <section className="emergency-dispatch-panel"><header><div><span>EMERGENCY DISPATCH</span><b>Add product quantity for this day</b></div><small>Saved automatically</small></header><div className="emergency-dispatch-form"><label className="emergency-line-select">Assembly line<select value={emergencyLine} onChange={(event) => setEmergencyLine(event.target.value as AssemblyLine)}><option value="AL1">AL1 · 615 family</option><option value="AL2">AL2 · 818 / 1021 families</option></select></label><label className="emergency-product-field">Product<input id="emergency-product" className="emergency-product-search" type="search" list="emergency-product-options" placeholder="Search or select product" value={emergencySearch} onChange={(event) => setEmergencySearch(event.target.value)} /></label><datalist id="emergency-product-options">{emergencyProductOptions.map((item) => <option value={item.materialCode} key={item.planId} />)}</datalist><label className="emergency-quantity-field">Quantity<input id="emergency-quantity" type="number" min="1" step="1" placeholder="Quantity" /></label><button type="button" onClick={() => { const product = document.getElementById("emergency-product") as HTMLInputElement | null; const quantity = document.getElementById("emergency-quantity") as HTMLInputElement | null; const selected = emergencyProductOptions.find((item) => item.materialCode.trim().toUpperCase() === (product?.value ?? "").trim().toUpperCase()); addEmergencyDispatch(activeDayPlanKey, selected?.planId ?? "", Number(quantity?.value ?? 0), emergencyLine); setScheduleLine(emergencyLine); setScheduleView(emergencyLine); if (quantity) quantity.value = ""; }}>Add dispatch</button></div>{emergencyDispatches.filter((record) => record.date === activeDayPlanKey).map((record) => <div className="emergency-dispatch-row" key={record.id}><b>{timeWiseDayPlan.find((item) => item.planId === record.planId)?.materialCode ?? emergencyProductOptions.find((item) => item.planId === record.planId)?.materialCode ?? record.planId}</b><span>{fmt.format(record.quantity)} pcs</span><button type="button" onClick={() => removeEmergencyDispatch(record.id)}>Remove</button></div>)}</section>
+                {scheduleDayView === "breakdown" && <section className="interruption-records-panel"><header><b>Additional interruption records</b><button type="button" onClick={() => addDailyInterruption(activeDayPlanKey)}>+ Add interruption</button></header>{(dailyInterruptions[activeDayPlanKey] ?? []).map((record) => <div className="interruption-record-row" key={record.id}><select value={record.type} onChange={(event) => updateDailyInterruption(activeDayPlanKey, record.id, "type", event.target.value)}><option value="power-cut">Power cut</option><option value="breakdown">Machine breakdown</option></select>{record.type === "breakdown" && <select value={record.machine ?? ""} onChange={(event) => updateDailyInterruption(activeDayPlanKey, record.id, "machine", event.target.value)}><option value="">Select machine</option>{data.machines.slice(ASSEMBLY_START_INDEX).map((machine) => <option value={machine.name} key={`${record.id}-${machine.key}`}>{machine.name}</option>)}</select>}<input type="time" value={record.start} onChange={(event) => updateDailyInterruption(activeDayPlanKey, record.id, "start", event.target.value)} /><input type="time" value={record.end} onChange={(event) => updateDailyInterruption(activeDayPlanKey, record.id, "end", event.target.value)} /><button type="button" onClick={() => removeDailyInterruption(activeDayPlanKey, record.id)}>Remove</button></div>)}</section>}
+                {scheduleDayView === "breakdown" && <section className="interruption-entry-panel"><header><div><span>BREAKDOWN &amp; MAINTENANCE</span><b>Power cuts and machine breakdowns</b></div><small>Saved automatically</small></header>{timeWiseDayPlan.map((item) => { const editKey = `${activeDayPlanKey}:${item.planId}`; const edit = dailyProductionEdits[editKey] ?? {}; const stationOptions = data.machines.slice(ASSEMBLY_START_INDEX).map((machine) => machine.name); return <article key={`interruptions-${editKey}`}><strong>{item.materialCode}</strong><label>Interruption<select value={edit.interruption ?? "none"} onChange={(event) => updateDailyProductionEdit(activeDayPlanKey, item, "interruption", event.target.value)}><option value="none">No interruption</option><option value="power-cut">Power cut</option><option value="breakdown">Machine breakdown</option></select></label>{edit.interruption === "power-cut" && <><label>From<input type="time" value={edit.interruptionStart ?? "08:00"} onChange={(event) => updateDailyProductionEdit(activeDayPlanKey, item, "interruptionStart", event.target.value)} /></label><label>To<input type="time" value={edit.interruptionEnd ?? "09:00"} onChange={(event) => updateDailyProductionEdit(activeDayPlanKey, item, "interruptionEnd", event.target.value)} /></label></>}{edit.interruption === "breakdown" && <><label>Machine<select value={edit.breakdownMachine ?? ""} onChange={(event) => updateDailyProductionEdit(activeDayPlanKey, item, "breakdownMachine", event.target.value)}><option value="">Select machine</option>{stationOptions.map((machine) => <option value={machine} key={`${editKey}-${machine}`}>{machine}</option>)}</select></label><label>From<input type="time" value={edit.interruptionStart ?? "08:00"} onChange={(event) => updateDailyProductionEdit(activeDayPlanKey, item, "interruptionStart", event.target.value)} /></label><label>To<input type="time" value={edit.interruptionEnd ?? "09:00"} onChange={(event) => updateDailyProductionEdit(activeDayPlanKey, item, "interruptionEnd", event.target.value)} /></label></>}</article>; })}</section>}
+                
+                <div className="daily-line-editors"><div><span>CHANGE ASSEMBLY LINE FOR THIS DAY</span><small>Select a destination line for each product planned on {activeDayPlanDate.toLocaleDateString("en-IN", { day: "2-digit", month: "short" })}</small></div>{timeWiseDayPlan.map((item) => <label key={`daily-line-${activeDayPlanKey}-${item.planId}`}><b>{item.materialCode}</b><select aria-label={`Assembly line for ${item.materialCode} on ${activeDayPlanKey}`} value={dailyAssemblyLines[`${activeDayPlanKey}:${item.planId}`] ?? item.assemblyLine} onChange={(event) => { const nextLine = event.target.value as AssemblyLine; updateDailyAssemblyLine(activeDayPlanKey, item.planId, nextLine); setScheduleLine(nextLine); setScheduleView(nextLine); }}><option value="AL1">Move to AL1</option><option value="AL2">Move to AL2</option></select></label>)}</div>
+                {scheduleDayView === "breakdown" && <section className="daily-shop-floor-entry"><header><div><span>EDITABLE DAILY PRODUCTION &amp; END-OF-SHIFT ENTRY</span><b>Plan, output, quality, manpower and interruptions</b></div><div className="daily-entry-actions"><small>Saved automatically</small><button type="button" onClick={() => resetAssemblyDay(activeDayPlanKey, scheduleLine)}>Reset shift &amp; quantities</button></div></header>{timeWiseDayPlan.map((item) => { const editKey = `${activeDayPlanKey}:${item.planId}`; const edit = dailyProductionEdits[editKey] ?? {}; return <article key={`daily-entry-${editKey}`}><div className="daily-entry-product"><b>{item.materialCode}</b><small>{dailyAssemblyLines[editKey] ?? item.assemblyLine} · cycle-based plan</small></div><label>Planned qty<input type="number" inputMode="numeric" min="0" step="1" value={edit.plannedQuantity ?? item.pieces} onChange={(event) => updateDailyProductionEdit(activeDayPlanKey, item, "plannedQuantity", Math.max(0, Math.trunc(+event.target.value || 0)))} /></label><label>Actual qty<input type="number" inputMode="numeric" min="0" step="1" placeholder="End of shift" value={edit.actualQuantity ?? ""} onChange={(event) => updateDailyProductionEdit(activeDayPlanKey, item, "actualQuantity", Math.max(0, Math.trunc(+event.target.value || 0)))} /></label><label>Rework qty<input type="number" inputMode="numeric" min="0" step="1" value={edit.reworkQuantity ?? ""} onChange={(event) => updateDailyProductionEdit(activeDayPlanKey, item, "reworkQuantity", Math.max(0, Math.trunc(+event.target.value || 0)))} /></label><label>Rejection qty<input type="number" inputMode="numeric" min="0" step="1" value={edit.rejectionQuantity ?? ""} onChange={(event) => updateDailyProductionEdit(activeDayPlanKey, item, "rejectionQuantity", Math.max(0, Math.trunc(+event.target.value || 0)))} /></label><label>Manpower<input type="number" inputMode="numeric" min="0" step="1" placeholder="Operators" value={edit.manpower ?? ""} onChange={(event) => updateDailyProductionEdit(activeDayPlanKey, item, "manpower", Math.max(0, Math.trunc(+event.target.value || 0)))} /></label><label>Interruption<select value={edit.interruption ?? "none"} onChange={(event) => updateDailyProductionEdit(activeDayPlanKey, item, "interruption", event.target.value)}><option value="none">No interruption</option><option value="breakdown">Machine breakdown</option><option value="power-cut">Power cut</option></select></label><label>Downtime (min)<input type="number" inputMode="numeric" min="0" step="1" disabled={!edit.interruption || edit.interruption === "none"} value={edit.downtimeMinutes ?? ""} onChange={(event) => updateDailyProductionEdit(activeDayPlanKey, item, "downtimeMinutes", Math.max(0, Math.trunc(+event.target.value || 0)))} /></label></article>; })}</section>}
                 <section className="machine-owner-panel"><header><div><span>MACHINE OWNER</span><b>Machine-wise manpower plan and actual</b></div><small>Every assembly-line station is listed; assign the planned and actual owner per machine.</small></header><div className="machine-owner-table"><div className="machine-owner-row machine-owner-head"><span>MACHINE</span><span>BOOTHS</span><span>PLANNED OPERATOR</span><span>ACTUAL OPERATOR</span></div>{data.machines.slice(ASSEMBLY_START_INDEX).map((machine, machineIndex) => { const index = ASSEMBLY_START_INDEX + machineIndex; const machineKey = machine.key; const ownerKey = `${activeDayPlanKey}:${scheduleLine}:${machineKey}`; const owner = machineOwners[ownerKey] ?? {}; return <div className="machine-owner-row" key={ownerKey}><span><b>{machine.name}</b><small>{machine.section} · {scheduleLine}</small></span><span>{configuredBooths(stationBooths, machineKey, index, scheduleLine)}</span><select aria-label={`Planned machine owner for ${machineKey}`} value={owner.plannedOperator ?? ""} onChange={(event) => updateMachineOwner(activeDayPlanKey, scheduleLine, machineKey, "plannedOperator", event.target.value)}><option value="">Select operator</option>{skillMatrix?.workers.map((worker) => <option value={worker.name} key={`planned-owner-${ownerKey}-${worker.id}`}>{worker.name}</option>)}</select><select aria-label={`Actual machine owner for ${machineKey}`} value={owner.actualOperator ?? ""} onChange={(event) => updateMachineOwner(activeDayPlanKey, scheduleLine, machineKey, "actualOperator", event.target.value)}><option value="">Select operator</option>{skillMatrix?.workers.map((worker) => <option value={worker.name} key={`actual-owner-${ownerKey}-${worker.id}`}>{worker.name}</option>)}</select></div>; })}</div></section>
-                <div className="outlook-day" style={{ display: scheduleDayView === "plan" ? undefined : "none", height: `${Math.max(770, ...timeWiseAgendaBlocks.map((item) => 110 + Math.max(0, item.endMinute - 8 * 60) * 1.2))}px` }}>
-                  {Array.from({ length: 10 }, (_, index) => { const minute = 8 * 60 + index * 60; return <div className="outlook-hour" style={{ top: `${20 + index * 72}px` }} key={`hour-${minute}`}><time>{clockMinuteLabel(minute)}</time><i /></div>; })}
+                <div className="outlook-day" style={{ display: scheduleDayView === "plan" ? undefined : "none", height: `${Math.max(770, 22 + assemblyCalendarHours * 72 + 100)}px`, overflowY: "auto" }}>
+                  {Array.from({ length: assemblyCalendarHours + 1 }, (_, index) => { const minute = 8 * 60 + index * 60; return <div className="outlook-hour" style={{ top: `${20 + index * 72}px` }} key={`hour-${minute}`}><time>{clockMinuteLabel(minute)}</time><i /></div>; })}
                   {timeWiseDayPlan.length === 0 && <div className="agenda-empty outlook-empty"><b>No production planned</b><span>This is an available working day for {scheduleLine}.</span></div>}
                   {activeDayMaintenanceSlots.map((slot) => { const top = 22 + Math.max(0, slot.startMinute - 8 * 60) * 1.2; const height = Math.max(24, slot.durationMinutes * 1.2); return <article className="agenda-maintenance outlook-event" style={{ top: `${top}px`, height: `${height}px` }} key={`pm-agenda-${activeDayPlanKey}-${slot.id}`}><time><b>{clockMinuteLabel(slot.startMinute)}</b><small>{clockMinuteLabel(slot.startMinute + slot.durationMinutes)}</small></time><div><span>PM · {slot.machineName} · {slot.durationMinutes} min · {scheduleLine}</span><h5>{slot.machineName}</h5><p>{slot.durationMinutes} minutes · machine PM slot</p></div></article>; })}
                   {timeWiseAgendaBlocks.map((item) => { const top = 22 + Math.max(0, item.startMinute - 8 * 60) * 1.2; const height = Math.max(48, (item.endMinute - item.startMinute) * 1.2 - 5); const isFirstSegment = item.startMinute === item.clockStartMinute; const isLastSegment = item.endMinute === item.clockEndMinute; const isEditingActual = scheduleActualDraft.date === activeDayPlanKey && scheduleActualDraft.planId === item.planId; const savedCheckpoint = actualProduction.find((record) => record.planId === item.planId && record.date === activeDayPlanKey); const recordedActual = savedCheckpoint?.quantity ?? 0; return <article className={`agenda-production outlook-event ${isFirstSegment || isLastSegment ? "has-actual-entry" : ""} ${isLastSegment ? "end-checkpoint-segment" : ""}`} style={{ top: `${top}px`, height: `${height}px` }} key={`agenda-${activeDayPlanKey}-${item.planId}-${item.windowIndex}`}><time><b>{clockMinuteLabel(item.startMinute)}</b><small>{clockMinuteLabel(item.endMinute)}</small></time><div><span>{scheduleLine} PRODUCTION{item.startMinute > item.clockStartMinute ? " · CONTINUED" : ""}</span><h5>{item.materialCode}</h5><p>{fmt.format(item.segmentPieces)} planned · {fmt.format(recordedActual)} actual · {item.family} family</p></div>{(isFirstSegment || isLastSegment) && <div className="calendar-actual-control">{isEditingActual ? <form onSubmit={saveScheduleActualProduction}>{isFirstSegment ? <input autoFocus aria-label={`Before lunch actual for ${item.materialCode}`} type="number" inputMode="numeric" min="0" step="1" placeholder="Before lunch" value={scheduleActualDraft.beforeLunchQuantity} onChange={(event) => setScheduleActualDraft((old) => ({ ...old, date: activeDayPlanKey, planId: item.planId, beforeLunchQuantity: event.target.value }))} /> : <input autoFocus aria-label={`End-of-day actual for ${item.materialCode}`} type="number" inputMode="numeric" min="0" step="1" placeholder="End-of-day" value={scheduleActualDraft.endOfDayQuantity} onChange={(event) => setScheduleActualDraft((old) => ({ ...old, date: activeDayPlanKey, planId: item.planId, endOfDayQuantity: event.target.value }))} />}<button type="submit">Save</button><button type="button" className="cancel" onClick={() => setScheduleActualDraft({ date: activeDayPlanKey, planId: "", beforeLunchQuantity: "", endOfDayQuantity: "" })}>×</button></form> : <button type="button" onClick={() => setScheduleActualDraft({ date: activeDayPlanKey, planId: item.planId, beforeLunchQuantity: savedCheckpoint?.beforeLunchQuantity ? String(savedCheckpoint.beforeLunchQuantity) : "", endOfDayQuantity: savedCheckpoint?.endOfDayQuantity ? String(savedCheckpoint.endOfDayQuantity) : "" })}><b>{isFirstSegment ? (savedCheckpoint?.beforeLunchQuantity === undefined ? "+ Add before lunch" : "Edit before lunch") : (savedCheckpoint?.endOfDayQuantity === undefined ? "+ Add end-of-day" : "Edit end-of-day")}</b><small>{isFirstSegment ? (savedCheckpoint?.beforeLunchQuantity === undefined ? "Before lunch checkpoint" : `${fmt.format(savedCheckpoint.beforeLunchQuantity)} pcs saved`) : (savedCheckpoint?.endOfDayQuantity === undefined ? "End-of-day checkpoint" : `${fmt.format(savedCheckpoint.endOfDayQuantity)} pcs saved`)}</small></button>}</div>}</article>; })}
+                  {timeWiseDayPlan.slice(1).map((item, index) => { const previous = timeWiseDayPlan[index]; if (!previous || previous.materialCode === item.materialCode) return null; const startMinute = Math.max(8 * 60, item.clockStartMinute - 20); return <article className="agenda-setup outlook-event" style={{ top: `${22 + (startMinute - 8 * 60) * 1.2}px`, height: "24px" }} key={`setup-${activeDayPlanKey}-${previous.planId}-${item.planId}`}><time><b>{clockMinuteLabel(startMinute)}</b><small>20 min</small></time><div><span>SETUP · {scheduleLine}</span><h5>{previous.materialCode} → {item.materialCode}</h5><p>Machine changeover · 20 minutes</p></div></article>; })}
                   <div className="agenda-break lunch outlook-break" style={{ top: `${22 + (12.5 * 60 - 8 * 60) * 1.2}px`, height: "36px" }}><time>12:30 PM</time><span><b>Lunch break</b><small>30 minutes · resumes 1:00 PM</small></span></div>
                   <div className="agenda-break tea outlook-break" style={{ top: `${22 + (16 * 60 - 8 * 60) * 1.2}px`, height: "32px" }}><time>4:00 PM</time><span><b>Tea break</b><small>10 minutes · resumes 4:10 PM</small></span></div>
                 </div>
