@@ -26,7 +26,7 @@ export async function POST(request: Request) {
     const name = body.name?.trim();
     const email = body.email?.trim().toLowerCase();
     if (!name || !email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return Response.json({ error: "Valid name and email are required." }, { status: 400 });
-    const role = body.role === "admin" ? "admin" : "user";
+    const role = body.role === "admin" || body.role === "operator" ? body.role : "user";
     await env.DB!.prepare(`INSERT INTO auth_users (email, name, role, active) VALUES (?, ?, ?, 1)
       ON CONFLICT(email) DO UPDATE SET name = excluded.name, role = excluded.role, active = 1, updated_at = CURRENT_TIMESTAMP`)
       .bind(email, name, role).run();

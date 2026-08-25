@@ -92,6 +92,12 @@ export async function isAdminUser(db: D1Database, email: string, runtime?: Runti
   return row?.role === "admin";
 }
 
+export async function userRole(db: D1Database, email: string, runtime?: RuntimeEnv) {
+  if (runtime?.ADMIN_EMAIL && normalizedEmail(runtime.ADMIN_EMAIL) === normalizedEmail(email)) return "admin" as const;
+  const row = await db.prepare("SELECT role FROM auth_users WHERE email = ? AND active = 1").bind(normalizedEmail(email)).first<{ role: string }>();
+  return row?.role === "operator" ? "operator" as const : row?.role === "admin" ? "admin" as const : "user" as const;
+}
+
 export async function authorizeGoogleUser(db: D1Database, user: { id: string; email: string; name: string; picture?: string }, runtime?: RuntimeEnv) {
   const email = normalizedEmail(user.email);
   const existing = await db.prepare("SELECT email, active FROM auth_users WHERE email = ?").bind(email).first<{ email: string; active: number }>();
