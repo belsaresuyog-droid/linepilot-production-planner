@@ -16,6 +16,12 @@ const isCodexSeatbeltSandbox = process.env.CODEX_SANDBOX === "seatbelt";
 const localBindingConfig = {
   main: "./worker/index.ts",
   compatibility_flags: ["nodejs_compat"],
+  // Keep the local worker inspector private and avoid collisions with other
+  // local instances. The application itself remains on the requested port.
+  dev: {
+    inspector_ip: "127.0.0.1",
+    inspector_port: 0,
+  },
   d1_databases: d1
     ? [
         {
@@ -53,6 +59,9 @@ export default defineConfig(async () => {
       vinext(),
       sites(),
       cloudflare({
+        // The inspector is not needed for normal local use. Disable it so the
+        // dev server exposes only the requested localhost application port.
+        inspectorPort: false,
         viteEnvironment: { name: "rsc", childEnvironments: ["ssr"] },
         config: localBindingConfig,
       }),

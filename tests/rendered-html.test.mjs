@@ -1,91 +1,89 @@
 import assert from "node:assert/strict";
-import { access, readFile, readdir } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-const developmentPreviewMeta =
-  /<meta(?=[^>]*\bname=["']codex-preview["'])(?=[^>]*\bcontent=["']development["'])[^>]*>/i;
-const templateRoot = new URL("../", import.meta.url);
-const previewRoot = new URL("../app/_sites-preview/", import.meta.url);
+const root = new URL("../", import.meta.url);
 
-async function render() {
-  const workerUrl = new URL("../dist/server/index.js", import.meta.url);
-  workerUrl.searchParams.set("test", `${process.pid}-${Date.now()}`);
-  const { default: worker } = await import(workerUrl.href);
+async function source(relativePath) {
+  return readFile(new URL(relativePath, root), "utf8");
+}
 
-  return worker.fetch(
-    new Request("http://localhost/", {
-      headers: { accept: "text/html" },
-    }),
-    {
-      ASSETS: {
-        fetch: async () => new Response("Not found", { status: 404 }),
-      },
-    },
-    {
-      waitUntil() {},
-      passThroughOnException() {},
-    },
+// Core scheduling contract: shift time × OEE × parallel booths ÷ cycle time.
+function capacity({ shiftHours, oeePercent, cycleSeconds, booths = 1, downtimeMinutes = 0 }) {
+  const productiveSeconds = Math.max(0, shiftHours * 3600 - downtimeMinutes * 60) * (oeePercent / 100);
+  return Math.floor((productiveSeconds * booths) / cycleSeconds);
+}
+
+function supportedQuantity(plannedQuantity, requirements) {
+  if (!requirements.length) return plannedQuantity;
+  return Math.min(
+    plannedQuantity,
+    ...requirements.map(({ available, required }) => Math.floor(available / required)),
   );
 }
 
-test("server-renders the starter loading skeleton", async () => {
-  const response = await render();
-  assert.equal(response.status, 200);
-  assert.match(response.headers.get("content-type") ?? "", /^text\/html\b/i);
+function isTuesdayOrHoliday(isoDate, holidays = []) {
+  const date = new Date(`${isoDate}T00:00:00Z`);
+  return date.getUTCDay() === 2 || holidays.includes(isoDate);
+}
 
-  const html = await response.text();
-  assert.match(html, developmentPreviewMeta);
-  assert.match(html, /<title>Your site is taking shape<\/title>/i);
-  assert.match(html, /Building your site/);
-  assert.match(html, /Your site is taking shape/);
-  assert.match(
-    html,
-    /Your first version will appear here automatically when it’s ready\./,
-  );
-  assert.doesNotMatch(html, /Codex/);
-  assert.match(html, /react-loading-skeleton/);
-  assert.match(html, /role="status"/);
+test("capacity calculation respects OEE, cycle time, booths, and downtime", () => {
+  assert.equal(capacity({ shiftHours: 8, oeePercent: 80, cycleSeconds: 16 }), 1440);
+  assert.equal(capacity({ shiftHours: 8, oeePercent: 80, cycleSeconds: 16, booths: 2 }), 2880);
+  assert.equal(capacity({ shiftHours: 8, oeePercent: 80, cycleSeconds: 16, downtimeMinutes: 60 }), 1260);
 });
 
-test("keeps the loading skeleton scoped and disposable", async () => {
-  const [preview, css, page, layout, packageJson, files] = await Promise.all([
-    readFile(new URL("SkeletonPreview.tsx", previewRoot), "utf8"),
-    readFile(new URL("preview.css", previewRoot), "utf8"),
-    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
-    readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
-    readFile(new URL("../package.json", import.meta.url), "utf8"),
-    readdir(previewRoot),
-  ]);
+test("feeder support is limited by the least-complete BOM component", () => {
+  assert.equal(supportedQuantity(100, [
+    { available: 250, required: 2 },
+    { available: 50, required: 1 },
+  ]), 50);
+  assert.equal(supportedQuantity(20, [{ available: 100, required: 1 }]), 20);
+  assert.equal(supportedQuantity(20, []), 20);
+});
 
-  assert.deepEqual(files.sort(), ["SkeletonPreview.tsx", "preview.css"]);
-  assert.match(preview, /from "react-loading-skeleton"/);
-  assert.match(preview, /baseColor="#eceae7"/);
-  assert.match(preview, /highlightColor="#f9f8f6"/);
-  assert.match(preview, /duration=\{2\.8\}/);
-  assert.match(preview, /sites-skeleton-search-placeholder/);
-  assert.match(packageJson, /"react-loading-skeleton": "3\.5\.0"/);
+test("Tuesday defaults to non-working while Sunday remains working", () => {
+  assert.equal(isTuesdayOrHoliday("2026-09-01"), true); // Tuesday
+  assert.equal(isTuesdayOrHoliday("2026-09-06"), false); // Sunday
+  assert.equal(isTuesdayOrHoliday("2026-09-06", ["2026-09-06"]), true);
+});
 
-  const shellIndex = preview.indexOf('className="sites-skeleton-shell"');
-  const statusIndex = preview.indexOf('className="sites-skeleton-status"');
-  assert.ok(shellIndex >= 0 && statusIndex > shellIndex);
-  assert.match(css, /position:\s*fixed/);
-  assert.match(css, /inset:\s*0/);
-  assert.match(css, /opacity:\s*0\.52/);
-  assert.match(css, /prefers-reduced-motion:\s*reduce/);
-  assert.doesNotMatch(css, /#020617|canvas|pets|progress/i);
-  assert.doesNotMatch(
-    preview,
-    /loading-spinner|status-mark|status-progress|canvas|cookie|random/i,
-  );
+test("planning API validates periods and upserts plans in D1", async () => {
+  const api = await source("app/api/plans/route.ts");
+  assert.match(api, /function validMonth\(/);
+  assert.match(api, /ON CONFLICT\(month\) DO UPDATE/);
+  assert.match(api, /DELETE FROM monthly_plans WHERE month = \?/);
+  assert.match(api, /status: 409/);
+});
 
-  assert.match(page, /export const metadata:\s*Metadata/);
-  assert.match(page, /"codex-preview": "development"/);
-  assert.match(page, /<SkeletonPreview \/>/);
-  assert.match(layout, /title:\s*"Starter Project"/);
-  assert.doesNotMatch(layout, /codex-preview|_sites-preview|themeColor|\bViewport\b/);
-  assert.doesNotMatch(css, /(^|\s)(html|body)\s*\{/m);
+test("planner imports XLSX dynamically and maps workbook rows", async () => {
+  const page = await source("app/page.tsx");
+  assert.match(page, /import\("xlsx"\)/);
+  assert.match(page, /XLSX\.utils\.sheet_to_json/);
+  assert.match(page, /uploadedPlanningRows/);
+  assert.match(page, /uploadedBomRows/);
+});
 
-  await assert.rejects(
-    access(new URL("public/_sites-preview", templateRoot)),
-  );
+test("operator and administrator workflows expose shared save controls", async () => {
+  const page = await source("app/page.tsx");
+  assert.match(page, /authRole === "operator"/);
+  assert.match(page, /Save day data/);
+  assert.match(page, /Save data/);
+  assert.match(page, /dailyProductionEdits/);
+  assert.match(page, /actualProduction/);
+});
+
+test("production planning includes editable due dates, assembly reassignment, and interruptions", async () => {
+  const page = await source("app/page.tsx");
+  assert.match(page, /updateDueDate/);
+  assert.match(page, /dailyAssemblyLines/);
+  assert.match(page, /dailyInterruptions/);
+  assert.match(page, /emergencyDispatches/);
+  assert.match(page, /preventiveMaintenanceSlots/);
+});
+
+test("worker delegates requests to the application router", async () => {
+  const worker = await source("worker/index.ts");
+  assert.match(worker, /return handler\.fetch\(request, env, ctx\)/);
+  assert.match(worker, /export default worker/);
 });
